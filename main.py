@@ -1,5 +1,13 @@
+import json
 import os
+import random
+import re
+import threading
 import time
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal
 
@@ -34,7 +42,7 @@ def home():
     )
 
 
-# max_retries=0 because we do our own failover below
+# max_retries=0 because we do our own retrying below
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -42,28 +50,786 @@ client = OpenAI(
     max_retries=0
 )
 
-# The FIRST model is your main model and is the one shown under the chatbot name.
-# If it is rate limited (429) or unavailable, the next ones are tried automatically.
-MODELS = [
-    "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-4-31b-it:free",
-    "openrouter/free",   # OpenRouter picks any free model that is available
-]
-MODEL = MODELS[0]
-ROUTER_MODEL = "openrouter/free"
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+OPENROUTER_SITE = "https://openrouter.ai"
+MODELS_URL = OPENROUTER_SITE + "/api/v1/models"
+
+MODELS_TTL = 600          # seconds the free-model list is reused
+REFRESH_MIN_AGE = 60      # the Refresh button can't hit OpenRouter more often than this
+STATS_TTL = 120           # seconds the latency stats are reused
+STATS_BUDGET = 12         # max seconds spent collecting latency stats
+PROBE_TIMEOUT = 12        # max seconds to wait for a live "is it answering?" test
+FASTEST_POOL = 3          # the random pick chooses among this many fastest models
+PROBE_BATCH = 4           # models tested at the same time when there are no latency stats
 
 SYSTEM_PROMPT = "You are a helpful chatbot."
-MAX_TOKENS = 1000     # max length of one reply
-MAX_HISTORY = 20      # how many recent messages are sent to the model
+MAX_TOKENS_CAP = 4096     # longest reply we ask for (lower if the model's own limit is lower)
+MAX_HISTORY = 20          # how many recent messages are sent to the model
 
-# Errors that would fail for every model, so there is no point trying the next one
-FATAL_STATUSES = {401, 402}
+FATAL_STATUSES = {401, 402}                          # would fail for every model
+RETRY_STATUSES = {408, 429, 500, 502, 503, 504}      # worth trying the same model again
+RETRY_WAITS = (1.5, 3.0)                             # seconds to wait between attempts
+MAX_ATTEMPTS = 3
+
+# Routers pick a different model each time, which is not what a fixed chat needs
+ROUTER_IDS = {"openrouter/free", "openrouter/auto", "openrouter/bodybuilder"}
+
+# Free models that are not general chat models (guardrails and similar)
+NON_CHAT_HINTS = (
+    "content safety",
+    "guardrail model",
+    "guard model",
+    "safety classifier",
+    "reranker",
+    "embedding model",
+)
+
+# ---------------------------------------------------------------------------
+# Categories. Every value comes from the OpenRouter API, nothing is hard coded
+# per model. Only the band boundaries below are our choice.
+# ---------------------------------------------------------------------------
+
+GROUPINGS = {
+    "context": {
+        "title": "Context window",
+        "hint": "How much text a model can read at once, in tokens",
+        "groups": [
+            ("1m", "1M+ tokens"),
+            ("200k", "200K to 1M tokens"),
+            ("100k", "100K to 200K tokens"),
+            ("32k", "32K to 100K tokens"),
+            ("small", "Under 32K tokens"),
+        ],
+    },
+    "size": {
+        "title": "Model size",
+        "hint": "Total parameters, only where the model itself states them",
+        "groups": [
+            ("500b", "500B and up"),
+            ("200b", "200B to 500B"),
+            ("50b", "50B to 200B"),
+            ("10b", "10B to 50B"),
+            ("small", "Under 10B"),
+            ("unknown", "Size not stated"),
+        ],
+    },
+    "quality": {
+        "title": "Benchmark score",
+        "hint": "Artificial Analysis Intelligence Index, as reported by OpenRouter",
+        "groups": [
+            ("40", "40 and above"),
+            ("30", "30 to 40"),
+            ("20", "20 to 30"),
+            ("low", "Under 20"),
+            ("none", "Not benchmarked yet"),
+        ],
+    },
+    "input": {
+        "title": "Input types",
+        "hint": "What you can send to the model",
+        "groups": [
+            ("multimodal", "Multimodal (audio or video)"),
+            ("vision", "Text and images"),
+            ("text", "Text only"),
+        ],
+    },
+}
 
 
-@app.get("/model")
-def get_model():
-    return {"model": MODEL}
+def context_tier(tokens):
+    if tokens >= 1_000_000:
+        return "1m"
+    if tokens >= 200_000:
+        return "200k"
+    if tokens >= 100_000:
+        return "100k"
+    if tokens >= 32_000:
+        return "32k"
+    return "small"
 
+
+def size_tier(total_b):
+    if total_b is None:
+        return "unknown"
+    if total_b >= 500:
+        return "500b"
+    if total_b >= 200:
+        return "200b"
+    if total_b >= 50:
+        return "50b"
+    if total_b >= 10:
+        return "10b"
+    return "small"
+
+
+def quality_tier(score):
+    if score is None:
+        return "none"
+    if score >= 40:
+        return "40"
+    if score >= 30:
+        return "30"
+    if score >= 20:
+        return "20"
+    return "low"
+
+
+def input_tier(inputs):
+    if "audio" in inputs or "video" in inputs:
+        return "multimodal"
+    if "image" in inputs:
+        return "vision"
+    return "text"
+
+
+# ---------------------------------------------------------------------------
+# Parameter counts. OpenRouter does not publish a parameter field, so we only
+# use sizes that the model itself states: in its id, in its Hugging Face repo
+# name, or in the first sentences of its OpenRouter description. Otherwise the
+# size is reported as "not stated" and never guessed.
+# ---------------------------------------------------------------------------
+
+_TOKEN_TOTAL = re.compile(r"^(\d+(?:\.\d+)?)([bt])$")
+_TOKEN_ACTIVE = re.compile(r"^a(\d+(?:\.\d+)?)([bt])$")
+
+_NU = r"(\d+(?:\.\d+)?)[- ]?(billion|trillion|B|T)\b"
+
+# (pattern, order of the captured numbers)
+_PAIRED_PATTERNS = [
+    # "5.1B active parameters out of 124B total"
+    (re.compile(_NU + r"\s+(?i:active\s+param\w*\s+(?:out\s+of|of)\s+(?:the\s+|a\s+)?)" + _NU + r"\s+(?i:total)"),
+     "active_total"),
+    # "30B total parameters and 3B active", "118B total parameter model with 8B active"
+    (re.compile(_NU + r"\s+(?i:total\s+param\w*)(?:\s+\w+){0,2}?\s*(?:,|(?i:and|with))\s*" + _NU + r"\s+(?i:active)"),
+     "total_active"),
+    # "124B total / 5.5B active"
+    (re.compile(_NU + r"\s+(?i:total)\s*/\s*" + _NU + r"\s+(?i:active)"), "total_active"),
+    # "33B-A3B"
+    (re.compile(r"(\d+(?:\.\d+)?)(B|T)-A(\d+(?:\.\d+)?)(B|T)\b"), "total_active"),
+]
+
+# Only accepted from the first sentence of the description
+_TOTAL_ONLY_PATTERNS = [
+    # "120B-parameter", "12-billion-parameter", "2.4 trillion-parameter"
+    re.compile(_NU + r"[- ](?i:param)"),
+    # "2.4 trillion total parameters"
+    re.compile(_NU + r"\s+(?i:total\s+param)"),
+]
+
+_COMPARISON_WORDS = (
+    "than", "outperform", "compared", "versus", " vs", "rival",
+    "larger", "smaller", "beats", "surpass",
+)
+
+
+def _to_billions(number, unit):
+    value = float(number)
+    return value * 1000 if unit.lower() in ("t", "trillion") else value
+
+
+def _sane(total, active):
+    if total is None or total <= 0 or total > 100_000:
+        return None
+    if active is not None and not (0 < active < total):
+        active = None
+    return total, active
+
+
+def size_from_identifier(text):
+    """Read a size such as 30b-a3b out of a model id or a Hugging Face repo name."""
+    totals = set()
+    actives = set()
+
+    for token in re.split(r"[^a-z0-9.]+", text.lower()):
+        match = _TOKEN_TOTAL.match(token)
+        if match:
+            totals.add(_to_billions(*match.groups()))
+        match = _TOKEN_ACTIVE.match(token)
+        if match:
+            actives.add(_to_billions(*match.groups()))
+
+    if len(totals) != 1:
+        return None
+
+    total = next(iter(totals))
+    active = next(iter(actives)) if len(actives) == 1 else None
+    return _sane(total, active)
+
+
+def _sentences(text):
+    return re.split(r"(?<=[.!?])\s+(?=[A-Z])", text.strip())
+
+
+def _is_comparison(text, start):
+    before = text[max(0, start - 40):start].lower()
+    return any(word in before for word in _COMPARISON_WORDS)
+
+
+def size_from_description(description):
+    """Read a stated size from the first sentences of the description."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", description or "")
+    sentences = _sentences(text)
+    if not sentences:
+        return None
+
+    early = " ".join(sentences[:3])
+
+    for pattern, order in _PAIRED_PATTERNS:
+        for match in pattern.finditer(early):
+            if _is_comparison(early, match.start()):
+                continue
+
+            groups = match.groups()
+            if len(groups) == 4:
+                first = _to_billions(groups[0], groups[1])
+                second = _to_billions(groups[2], groups[3])
+            else:
+                continue
+
+            if order == "active_total":
+                active, total = first, second
+            else:
+                total, active = first, second
+
+            result = _sane(total, active)
+            if result:
+                return result
+
+    for pattern in _TOTAL_ONLY_PATTERNS:
+        match = pattern.search(sentences[0])
+        if match and not _is_comparison(sentences[0], match.start()):
+            result = _sane(_to_billions(*match.groups()), None)
+            if result:
+                return result
+
+    return None
+
+
+def parse_size(entry):
+    """Returns (total_b, active_b, source) or (None, None, None)."""
+    slug = (entry.get("id") or "").split(":")[0]
+
+    for source, text in (("id", slug), ("weights", entry.get("hugging_face_id") or "")):
+        found = size_from_identifier(text)
+        if found:
+            return found[0], found[1], source
+
+    found = size_from_description(entry.get("description") or "")
+    if found:
+        return found[0], found[1], "description"
+
+    return None, None, None
+
+
+# ---------------------------------------------------------------------------
+# Turning OpenRouter's raw model list into our free chat-model catalog
+# ---------------------------------------------------------------------------
+
+def _price(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_free(entry):
+    pricing = entry.get("pricing") or {}
+
+    if _price(pricing.get("prompt")) != 0 or _price(pricing.get("completion")) != 0:
+        return False
+
+    for key in ("request", "image", "internal_reasoning"):
+        if key in pricing and _price(pricing[key]) != 0:
+            return False
+
+    return True
+
+
+def is_expired(entry, today):
+    expires = entry.get("expiration_date")
+    if not expires:
+        return False
+    try:
+        # A model that ends today is treated as already gone
+        return datetime.strptime(str(expires)[:10], "%Y-%m-%d").date() <= today
+    except ValueError:
+        return False
+
+
+def is_chat_model(entry):
+    model_id = entry.get("id") or ""
+    if not model_id or model_id.startswith("~") or model_id in ROUTER_IDS:
+        return False
+    if entry.get("alias_target"):
+        return False
+
+    architecture = entry.get("architecture") or {}
+    if architecture.get("tokenizer") == "Router":
+        return False
+
+    inputs = architecture.get("input_modalities") or []
+    outputs = architecture.get("output_modalities") or []
+    if "text" not in inputs or "text" not in outputs:
+        return False
+
+    parameters = entry.get("supported_parameters") or []
+    if not any(name in parameters for name in ("max_tokens", "max_completion_tokens")):
+        return False
+
+    text = ((entry.get("name") or "") + " " + (entry.get("description") or "")).lower()
+    if any(hint in text for hint in NON_CHAT_HINTS):
+        return False
+
+    return True
+
+
+def format_tokens(count):
+    if count >= 1_000_000:
+        return ("%.2f" % (count / 1_000_000)).rstrip("0").rstrip(".") + "M"
+    if count >= 1000:
+        return "%dK" % round(count / 1000)
+    return str(count)
+
+
+def format_params(billions):
+    if billions >= 1000:
+        return "%gT" % (billions / 1000)
+    return "%gB" % billions
+
+
+def clean_description(text):
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > 240:
+        text = text[:240].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return text
+
+
+def build_model(entry):
+    model_id = entry["id"]
+    author = model_id.split("/")[0]
+    full_name = entry.get("name") or model_id
+
+    provider, _, rest = full_name.partition(": ")
+    if not rest:
+        provider, rest = author, full_name
+    short_name = re.sub(r"\s*\(free\)\s*$", "", rest, flags=re.I).strip() or rest
+
+    architecture = entry.get("architecture") or {}
+    inputs = list(architecture.get("input_modalities") or [])
+    parameters = entry.get("supported_parameters") or []
+    top_provider = entry.get("top_provider") or {}
+
+    context = entry.get("context_length") or top_provider.get("context_length") or 0
+    max_output = top_provider.get("max_completion_tokens")
+    if not isinstance(max_output, int) or max_output <= 0:
+        max_output = None
+
+    total_b, active_b, size_source = parse_size(entry)
+    if total_b is None:
+        params_label = "Size not stated"
+    elif active_b is not None:
+        params_label = "%s total, %s active" % (format_params(total_b), format_params(active_b))
+    else:
+        params_label = format_params(total_b)
+
+    benchmarks = (entry.get("benchmarks") or {}).get("artificial_analysis") or {}
+    score = benchmarks.get("intelligence_index")
+    score = float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else None
+
+    created = entry.get("created")
+    created_date = None
+    if isinstance(created, (int, float)) and created > 0:
+        created_date = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    expires = entry.get("expiration_date")
+    expires = str(expires)[:10] if expires else None
+
+    return {
+        "id": model_id,
+        "name": short_name,
+        "full_name": full_name,
+        "provider": provider,
+        "provider_key": author,
+        "description": clean_description(entry.get("description")),
+        "context": context,
+        "context_label": format_tokens(context),
+        "max_output": max_output,
+        "max_output_label": format_tokens(max_output) if max_output else None,
+        "params_total_b": total_b,
+        "params_active_b": active_b,
+        "params_label": params_label,
+        "params_source": size_source,
+        "input": inputs,
+        "vision": "image" in inputs,
+        "audio": "audio" in inputs,
+        "video": "video" in inputs,
+        "reasoning": ("reasoning" in parameters or "include_reasoning" in parameters
+                      or isinstance(entry.get("reasoning"), dict)),
+        "tools": "tools" in parameters,
+        "intelligence": score,
+        "created": created_date,
+        "expires": expires,
+        "tiers": {
+            "context": context_tier(context),
+            "size": size_tier(total_b),
+            "quality": quality_tier(score),
+            "input": input_tier(inputs),
+            "provider": author,
+        },
+        "_details": (entry.get("links") or {}).get("details"),
+    }
+
+
+def normalize_models(raw_entries, today=None):
+    """Keep only free, currently available chat models."""
+    today = today or datetime.now(timezone.utc).date()
+    models = {}
+
+    for entry in raw_entries:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        if not is_free(entry) or not is_chat_model(entry) or is_expired(entry, today):
+            continue
+        models[entry["id"]] = build_model(entry)
+
+    return sorted(models.values(), key=lambda m: (m["provider"].lower(), m["name"].lower()))
+
+
+def public_model(model):
+    return {key: value for key, value in model.items() if not key.startswith("_")}
+
+
+def build_groupings(models):
+    groupings = {
+        name: {
+            "title": config["title"],
+            "hint": config["hint"],
+            "groups": [{"key": key, "label": label} for key, label in config["groups"]],
+        }
+        for name, config in GROUPINGS.items()
+    }
+
+    counts = {}
+    labels = {}
+    for model in models:
+        key = model["provider_key"]
+        counts[key] = counts.get(key, 0) + 1
+        labels.setdefault(key, model["provider"])
+
+    ordered = sorted(counts, key=lambda key: (-counts[key], labels[key].lower()))
+    groupings["provider"] = {
+        "title": "Provider",
+        "hint": "The company behind the model",
+        "groups": [{"key": key, "label": labels[key]} for key in ordered],
+    }
+    return groupings
+
+
+# ---------------------------------------------------------------------------
+# Talking to the OpenRouter web API (cached)
+# ---------------------------------------------------------------------------
+
+class CatalogError(Exception):
+    pass
+
+
+class ModelUnavailable(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
+
+
+_state = {"models": [], "by_id": {}, "fetched_at": 0.0, "stats": {}, "stats_at": 0.0}
+_lock = threading.Lock()
+
+
+def fetch_json(url, timeout=15, auth=False):
+    headers = {"Accept": "application/json", "User-Agent": "CRChatbot/1.0"}
+
+    key = os.getenv("OPENROUTER_API_KEY")
+    if auth and key:
+        headers["Authorization"] = "Bearer " + key
+
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def load_catalog(force=False):
+    """Fetch the free-model list, reusing the cached copy while it is fresh."""
+    with _lock:
+        age = time.time() - _state["fetched_at"]
+        have = bool(_state["models"])
+        if have and age < MODELS_TTL and not (force and age >= REFRESH_MIN_AGE):
+            return
+
+    try:
+        payload = fetch_json(MODELS_URL, timeout=20)
+        models = normalize_models(payload.get("data") or [])
+        if not models:
+            raise ValueError("OpenRouter returned no free chat models")
+    except Exception as error:
+        print("[CRChatbot] Could not refresh the model list:", error)
+        if have:
+            return   # keep showing the older list
+        raise CatalogError(
+            "Couldn't load the free-model list from OpenRouter. "
+            "Check your internet connection and try again."
+        )
+
+    with _lock:
+        _state["models"] = models
+        _state["by_id"] = {model["id"]: model for model in models}
+        _state["fetched_at"] = time.time()
+
+
+def list_models():
+    with _lock:
+        return list(_state["models"])
+
+
+def find_model(model_id):
+    with _lock:
+        return _state["by_id"].get(model_id)
+
+
+# ---------------------------------------------------------------------------
+# Latency stats and the random "fast model" pick
+# ---------------------------------------------------------------------------
+
+def _endpoints_of(payload):
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        data = data.get("endpoints")
+    return [item for item in (data or []) if isinstance(item, dict)]
+
+
+def _number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def endpoint_urls(model):
+    urls = [OPENROUTER_SITE + "/api/v1/models/" + urllib.parse.quote(model["id"], safe="/:") + "/endpoints"]
+    if model.get("_details"):
+        urls.append(OPENROUTER_SITE + model["_details"])
+    return list(dict.fromkeys(urls))
+
+
+def fetch_model_stats(model):
+    """Latency of the model's free endpoints as reported by OpenRouter (may be unknown)."""
+    for url in endpoint_urls(model):
+        try:
+            payload = fetch_json(url, timeout=8, auth=True)
+        except Exception:
+            continue
+
+        free = [ep for ep in _endpoints_of(payload) if is_free({"pricing": ep.get("pricing")})]
+        if not free:
+            continue
+
+        latencies = []
+        healthy = False
+
+        for ep in free:
+            status = _number(ep.get("status"))
+            uptime = _number(ep.get("uptime_last_30m"))
+
+            if (status is not None and status < 0) or (uptime is not None and uptime < 50):
+                continue
+
+            healthy = True
+            p50 = _number((ep.get("latency_last_30m") or {}).get("p50"))
+            if p50 is not None and p50 > 0:
+                latencies.append(p50)
+
+        return {"latency": min(latencies) if latencies else None, "healthy": healthy}
+
+    return {"latency": None, "healthy": True}   # unknown, so not held against the model
+
+
+def refresh_stats(models):
+    with _lock:
+        if _state["stats"] and time.time() - _state["stats_at"] < STATS_TTL:
+            return dict(_state["stats"])
+
+    results = {}
+    pool = ThreadPoolExecutor(max_workers=12)
+    futures = {pool.submit(fetch_model_stats, model): model["id"] for model in models}
+
+    try:
+        for future in as_completed(futures, timeout=STATS_BUDGET):
+            try:
+                results[futures[future]] = future.result()
+            except Exception:
+                pass
+    except Exception:
+        pass   # out of time, use what we have
+    finally:
+        for future in futures:
+            future.cancel()
+        pool.shutdown(wait=False)
+
+    with _lock:
+        _state["stats"] = results
+        _state["stats_at"] = time.time()
+
+    return dict(results)
+
+
+def first_output(chunk):
+    if not chunk.choices:
+        return False
+    delta = chunk.choices[0].delta
+    return bool(getattr(delta, "content", None) or getattr(delta, "reasoning", None))
+
+
+def probe_model(model_id):
+    """Send a tiny request and time how long the first output takes."""
+    started = time.monotonic()
+    stream = None
+
+    try:
+        stream = client.with_options(timeout=PROBE_TIMEOUT).chat.completions.create(
+            model=model_id,
+            messages=[{"role": "user", "content": "Say hi."}],
+            max_tokens=16,
+            stream=True
+        )
+
+        for chunk in stream:
+            if first_output(chunk):
+                return {"ok": True, "ms": round((time.monotonic() - started) * 1000)}
+
+        return {"ok": False}
+
+    except Exception as error:
+        print("[CRChatbot] probe of %s failed: %s" % (model_id, getattr(error, "message", error)))
+        return {"ok": False}
+
+    finally:
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+
+def probe_many(models):
+    results = {}
+    pool = ThreadPoolExecutor(max_workers=max(1, len(models)))
+    futures = {pool.submit(probe_model, model["id"]): model["id"] for model in models}
+
+    try:
+        for future in as_completed(futures, timeout=PROBE_TIMEOUT + 5):
+            try:
+                results[futures[future]] = future.result()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        pool.shutdown(wait=False)
+
+    return results
+
+
+def pick_random_fast():
+    """A random free model from the fastest ones that are answering right now."""
+    load_catalog()
+    models = list_models()
+    stats = refresh_stats(models)
+
+    def info(model):
+        return stats.get(model["id"]) or {"latency": None, "healthy": True}
+
+    healthy = [m for m in models if info(m)["healthy"]] or models
+    ranked = sorted((m for m in healthy if info(m)["latency"] is not None),
+                    key=lambda m: info(m)["latency"])
+
+    tried = set()
+
+    if ranked:
+        pool = ranked[:FASTEST_POOL]
+        random.shuffle(pool)
+        order = pool + ranked[FASTEST_POOL:FASTEST_POOL + 3]
+
+        for model in order:
+            tried.add(model["id"])
+            result = probe_model(model["id"])
+            if result["ok"]:
+                note = ("Picked at random from the %d fastest free models by OpenRouter's recent "
+                        "latency stats, and confirmed just now (%d ms to first output)."
+                        % (len(pool), result["ms"]))
+                return model, result["ms"], "stats", note
+
+    remaining = [m for m in healthy if m["id"] not in tried]
+    random.shuffle(remaining)
+
+    for start in range(0, min(len(remaining), PROBE_BATCH * 2), PROBE_BATCH):
+        batch = remaining[start:start + PROBE_BATCH]
+        results = probe_many(batch)
+        working = [(results[m["id"]]["ms"], m) for m in batch
+                   if results.get(m["id"], {}).get("ok")]
+
+        if working:
+            ms, model = min(working, key=lambda item: item[0])
+            note = ("OpenRouter's latency stats weren't available, so %d random free models were "
+                    "tested live and this one answered fastest (%d ms to first output)."
+                    % (len(batch), ms))
+            return model, ms, "probe", note
+
+    raise ModelUnavailable(
+        "None of the free models answered right now (they may all be rate limited). "
+        "Wait a minute and try again, or pick one from the list."
+    )
+
+
+# ---------------------------------------------------------------------------
+# API routes for the dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/api/models")
+def api_models(refresh: int = 0):
+    try:
+        load_catalog(force=bool(refresh))
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+    models = list_models()
+
+    with _lock:
+        fetched_at = _state["fetched_at"]
+
+    return {
+        "models": [public_model(model) for model in models],
+        "groupings": build_groupings(models),
+        "count": len(models),
+        "fetched_at": datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat(),
+        "source": MODELS_URL,
+    }
+
+
+@app.post("/api/random-model")
+def api_random_model():
+    try:
+        model, ms, mode, note = pick_random_fast()
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+    except ModelUnavailable as error:
+        raise HTTPException(status_code=503, detail=error.message)
+
+    return {"model": public_model(model), "measured_ms": ms, "mode": mode, "note": note}
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
@@ -71,6 +837,7 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model: str
     messages: List[Message]
 
 
@@ -98,35 +865,42 @@ def build_messages(items):
     return [{"role": "system", "content": SYSTEM_PROMPT}] + cleaned
 
 
-def describe_error(error):
+def merge_system(messages):
+    """For models that refuse a system message: put it inside the first user message."""
+    system = messages[0]["content"]
+    rest = [dict(message) for message in messages[1:]]
+
+    if rest and rest[0]["role"] == "user":
+        rest[0]["content"] = system + "\n\n" + rest[0]["content"]
+
+    return rest
+
+
+def describe_error(error, name="This model"):
     status = getattr(error, "status_code", None)
 
     if status == 429:
         return (
-            "The free models are rate limited right now. Wait a minute and try again, "
-            "or add your own provider key at openrouter.ai/settings/integrations "
-            "to get your own rate limit."
+            name + " is rate limited right now (free models share limits). "
+            "Try again in a moment, choose another model, or add your own provider key at "
+            "openrouter.ai/settings/integrations to get your own rate limit."
         )
     if status == 401:
         return "OpenRouter rejected the API key. Check OPENROUTER_API_KEY in your .env file."
     if status == 402:
         return "This OpenRouter account has no credits left for that model."
+    if status == 404:
+        return name + " isn't available on OpenRouter any more. Choose another model."
     if isinstance(error, openai.APITimeoutError):
-        return "The model took too long to respond. Try again."
+        return name + " took too long to respond. Try again or choose another model."
     if isinstance(error, openai.APIConnectionError):
         return "Couldn't reach OpenRouter. Check your internet connection and try again."
 
-    return f"The model request failed: {getattr(error, 'message', error)}"
-
-
-class ModelUnavailable(Exception):
-    def __init__(self, message):
-        super().__init__(message)
-        self.message = message
+    return "The model request failed: %s" % getattr(error, "message", error)
 
 
 def first_token(iterator):
-    """Read the stream until the first piece of text arrives."""
+    """Read the stream until the first piece of answer text arrives."""
     for chunk in iterator:
         if not chunk.choices:
             continue
@@ -134,79 +908,106 @@ def first_token(iterator):
         token = chunk.choices[0].delta.content
 
         if token:
-            return token, getattr(chunk, "model", None)
+            return token
 
-    return None, None
+    return None
 
 
-def open_stream(messages):
-    """Try each model in MODELS until one starts answering."""
-    last_message = "No model is configured."
+def open_stream(model, messages):
+    """Start a reply from the chosen model. The model is never swapped for another one."""
+    max_tokens = MAX_TOKENS_CAP
+    if model.get("max_output"):
+        max_tokens = max(256, min(MAX_TOKENS_CAP, model["max_output"]))
 
-    for attempt in range(2):
-        rate_limited = False
+    plain = False       # True once we had to fold the system prompt into the user message
+    attempt = 0
+    last_message = "The model did not answer."
 
-        for model in MODELS:
-            stream = None
+    while attempt < MAX_ATTEMPTS:
+        attempt += 1
+        stream = None
 
-            try:
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=MAX_TOKENS,
-                    stream=True
-                )
+        try:
+            stream = client.chat.completions.create(
+                model=model["id"],
+                messages=merge_system(messages) if plain else messages,
+                max_tokens=max_tokens,
+                stream=True
+            )
 
-                iterator = iter(stream)
-                token, reported_model = first_token(iterator)
+            iterator = iter(stream)
+            token = first_token(iterator)
 
-                if token is not None:
-                    # openrouter/free tells us which model it picked
-                    if model == ROUTER_MODEL and reported_model:
-                        used_model = reported_model
-                    else:
-                        used_model = model
+            if token is not None:
+                return token, iterator, stream
 
-                    return used_model, token, iterator, stream
+            stream.close()
+            last_message = "The model returned an empty reply. Try again or choose another model."
+            print("[CRChatbot] %s returned an empty reply" % model["id"])
 
+        except openai.APIError as error:
+            if stream is not None:
                 stream.close()
-                last_message = "The model returned an empty reply. Try again."
-                print(f"[CRChatbot] {model} returned an empty reply, trying the next model")
 
-            except openai.APIError as error:
-                if stream is not None:
-                    stream.close()
+            status = getattr(error, "status_code", None)
+            last_message = describe_error(error, model["name"])
+            print("[CRChatbot] %s failed (%s): %s"
+                  % (model["id"], status or type(error).__name__, getattr(error, "message", error)))
 
-                status = getattr(error, "status_code", None)
-                last_message = describe_error(error)
-                print(f"[CRChatbot] {model} failed ({status or type(error).__name__}): "
-                      f"{getattr(error, 'message', error)}")
+            if status in FATAL_STATUSES:
+                break
 
-                if status in FATAL_STATUSES:
-                    raise ModelUnavailable(last_message)
+            # Some models reject the system message, so try once without it
+            if status == 400 and not plain:
+                plain = True
+                attempt -= 1
+                continue
 
-                if status == 429:
-                    rate_limited = True
+            if status is not None and status not in RETRY_STATUSES:
+                break
 
-        # Only worth a second pass if the models were just busy
-        if not rate_limited:
-            break
-
-        time.sleep(2)
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(RETRY_WAITS[attempt - 1])
 
     raise ModelUnavailable(last_message)
+
+
+def require_free_model(model_id):
+    try:
+        load_catalog()
+    except CatalogError as error:
+        raise HTTPException(status_code=503, detail=str(error))
+
+    model = find_model(model_id)
+
+    if model is None:
+        # The list may have changed since it was cached
+        try:
+            load_catalog(force=True)
+        except CatalogError:
+            pass
+        model = find_model(model_id)
+
+    if model is None:
+        raise HTTPException(
+            status_code=400,
+            detail="That model isn't in the current free-model list any more. Choose another model."
+        )
+
+    return model
 
 
 @app.post("/chat")
 def chat(data: ChatRequest):
 
+    model = require_free_model(data.model)
     messages = build_messages(data.messages)
 
     if len(messages) < 2:
         raise HTTPException(status_code=400, detail="Type a message first.")
 
     try:
-        used_model, token, iterator, stream = open_stream(messages)
+        token, iterator, stream = open_stream(model, messages)
     except ModelUnavailable as error:
         raise HTTPException(status_code=503, detail=error.message)
 
@@ -225,7 +1026,7 @@ def chat(data: ChatRequest):
                     yield piece
 
         except Exception as error:
-            yield f"\n\n[Reply interrupted: {describe_error(error)}]"
+            yield "\n\n[Reply interrupted: %s]" % describe_error(error, model["name"])
 
         finally:
             stream.close()
@@ -234,7 +1035,7 @@ def chat(data: ChatRequest):
         generate(),
         media_type="text/plain",
         headers={
-            "X-Model": used_model,
+            "X-Model": model["id"],
             "Cache-Control": "no-store"
         }
     )
