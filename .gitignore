@@ -1,0 +1,5 @@
+.env
+.venv/
+__pycache__/
+deploy.zip
+webapp_logs.zip
