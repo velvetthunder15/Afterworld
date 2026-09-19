@@ -1,4 +1,3 @@
-
 import os
 import uuid
 from pathlib import Path
@@ -26,7 +25,11 @@ app.mount(
 
 @app.get("/")
 def home():
-    return FileResponse(STATIC_DIR / "index.html")
+    # no-store makes the browser load the latest index.html every time
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-store"}
+    )
 
 
 client = OpenAI(
@@ -35,10 +38,14 @@ client = OpenAI(
     timeout=60.0
 )
 
-MODEL = "google/gemma-4-26b-a4b:free"
-app.get("/model")
+# Note the "-it" in the ID: this is the exact OpenRouter ID for the free tier
+MODEL = "google/gemma-4-26b-a4b-it:free"
+
+
+@app.get("/model")
 def get_model():
-    return {"model": MODEL_NAME}
+    return {"model": MODEL}
+
 
 # Each browser gets its own conversation
 conversations = {}
@@ -110,6 +117,11 @@ def chat(request: Request, data: ChatRequest):
             })
 
         except Exception as e:
+            # Drop the unanswered user message so a failed request
+            # doesn't stay in the conversation history
+            if conversation and conversation[-1]["role"] == "user":
+                conversation.pop()
+
             yield f"\n[Error: {str(e)}]"
 
     response = StreamingResponse(
