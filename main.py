@@ -6,9 +6,11 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 from typing import List, Literal
 
 import openai
@@ -59,15 +61,31 @@ MODELS_URL = OPENROUTER_SITE + "/api/v1/models"
 
 MODELS_TTL = 600          # seconds the free-model list is reused
 REFRESH_MIN_AGE = 60      # the Refresh button can't hit OpenRouter more often than this
-STATS_TTL = 120           # seconds the latency stats are reused
+STATS_TTL = 90            # seconds the latency stats are reused
 STATS_BUDGET = 12         # max seconds spent collecting latency stats
 PROBE_TIMEOUT = 12        # max seconds to wait for a live "is it answering?" test
 FASTEST_POOL = 3          # the random pick chooses among this many fastest models
 PROBE_BATCH = 4           # models tested at the same time when there are no latency stats
+THROTTLE_WINDOW = 600     # a model counts as rate limited for this long after a 429
+MEASURED_FRESH = 300      # a live measurement newer than this is shown instead of OpenRouter's median
+MEASURED_MAX_AGE = 1800   # live measurements are dropped after this long
+
+# Free-model limits from OpenRouter's documentation. They apply to the whole account,
+# not to each model, and buying credits does not change the per-minute limit.
+FREE_LIMITS = {
+    "per_minute": 20,
+    "per_day": 50,
+    "per_day_with_credits": 1000,
+    "credits_threshold": 10,
+}
 
 SYSTEM_PROMPT = "You are a helpful chatbot."
 MAX_TOKENS_CAP = 4096     # longest reply we ask for (lower if the model's own limit is lower)
 MAX_HISTORY = 20          # how many recent messages are sent to the model
+
+MAX_IMAGES = 8                  # images accepted in one request
+MAX_IMAGE_CHARS = 4_000_000     # size limit of one image, as a base64 data URL
+IMAGE_URL = re.compile(r"data:image/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}")
 
 FATAL_STATUSES = {401, 402}                          # would fail for every model
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504}      # worth trying the same model again
@@ -545,10 +563,15 @@ class ModelUnavailable(Exception):
 
 _state = {"models": [], "by_id": {}, "fetched_at": 0.0, "stats": {}, "stats_at": 0.0}
 _lock = threading.Lock()
+_stats_lock = threading.Lock()
+
+_observed = {}       # model id -> what this server has seen itself: last measured speed, last 429
+_stat_urls = {}      # model id -> the endpoints URL that worked last time
+_requests = deque()  # when this server sent requests to free models (for the usage counter)
 
 
 def fetch_json(url, timeout=15, auth=False):
-    headers = {"Accept": "application/json", "User-Agent": "CRChatbot/1.0"}
+    headers = {"Accept": "application/json", "User-Agent": "Afterworld/1.0"}
 
     key = os.getenv("OPENROUTER_API_KEY")
     if auth and key:
@@ -573,7 +596,7 @@ def load_catalog(force=False):
         if not models:
             raise ValueError("OpenRouter returned no free chat models")
     except Exception as error:
-        print("[CRChatbot] Could not refresh the model list:", error)
+        print("[Afterworld] Could not refresh the model list:", error)
         if have:
             return   # keep showing the older list
         raise CatalogError(
@@ -618,11 +641,19 @@ def endpoint_urls(model):
     urls = [OPENROUTER_SITE + "/api/v1/models/" + urllib.parse.quote(model["id"], safe="/:") + "/endpoints"]
     if model.get("_details"):
         urls.append(OPENROUTER_SITE + model["_details"])
-    return list(dict.fromkeys(urls))
+    urls = list(dict.fromkeys(urls))
+
+    # start with the URL that worked last time
+    remembered = _stat_urls.get(model["id"])
+    if remembered in urls:
+        urls.remove(remembered)
+        urls.insert(0, remembered)
+
+    return urls
 
 
 def fetch_model_stats(model):
-    """Latency of the model's free endpoints as reported by OpenRouter (may be unknown)."""
+    """What OpenRouter reports about the model's free endpoints. Any of it can be unknown."""
     for url in endpoint_urls(model):
         try:
             payload = fetch_json(url, timeout=8, auth=True)
@@ -633,12 +664,18 @@ def fetch_model_stats(model):
         if not free:
             continue
 
+        _stat_urls[model["id"]] = url
+
         latencies = []
+        uptimes = []
         healthy = False
 
         for ep in free:
             status = _number(ep.get("status"))
             uptime = _number(ep.get("uptime_last_30m"))
+
+            if uptime is not None:
+                uptimes.append(uptime)
 
             if (status is not None and status < 0) or (uptime is not None and uptime < 50):
                 continue
@@ -648,38 +685,129 @@ def fetch_model_stats(model):
             if p50 is not None and p50 > 0:
                 latencies.append(p50)
 
-        return {"latency": min(latencies) if latencies else None, "healthy": healthy}
+        return {
+            "raw_latency": min(latencies) if latencies else None,
+            "healthy": healthy,
+            "uptime": max(uptimes) if uptimes else None,
+            "known": True,
+        }
 
-    return {"latency": None, "healthy": True}   # unknown, so not held against the model
+    return {"raw_latency": None, "healthy": True, "uptime": None, "known": False}   # unknown, not held against the model
 
 
 def refresh_stats(models):
+    with _stats_lock:
+        with _lock:
+            if _state["stats"] and time.time() - _state["stats_at"] < STATS_TTL:
+                return dict(_state["stats"])
+
+        results = {}
+        pool = ThreadPoolExecutor(max_workers=12)
+        futures = {pool.submit(fetch_model_stats, model): model["id"] for model in models}
+
+        try:
+            for future in as_completed(futures, timeout=STATS_BUDGET):
+                try:
+                    results[futures[future]] = future.result()
+                except Exception:
+                    pass
+        except Exception:
+            pass   # out of time, use what we have
+        finally:
+            for future in futures:
+                future.cancel()
+            pool.shutdown(wait=False)
+
+        # OpenRouter's docs call these numbers milliseconds, but their examples look like seconds.
+        # Decide from the data itself: a hosted model never answers in under 60 ms and never
+        # takes a full minute to start, so a median below 60 means seconds.
+        raws = [r["raw_latency"] for r in results.values() if r.get("raw_latency") is not None]
+        factor = 1000.0 if raws and median(raws) < 60 else 1.0
+
+        for result in results.values():
+            raw = result.pop("raw_latency", None)
+            result["latency"] = None if raw is None else round(raw * factor)
+
+        with _lock:
+            _state["stats"] = results
+            _state["stats_at"] = time.time()
+
+        return dict(results)
+
+
+# ---------------------------------------------------------------------------
+# What this server has seen itself (speed of real replies, 429s, request counts)
+# ---------------------------------------------------------------------------
+
+def record_request():
     with _lock:
-        if _state["stats"] and time.time() - _state["stats_at"] < STATS_TTL:
-            return dict(_state["stats"])
+        _requests.append(time.time())
 
-    results = {}
-    pool = ThreadPoolExecutor(max_workers=12)
-    futures = {pool.submit(fetch_model_stats, model): model["id"] for model in models}
 
-    try:
-        for future in as_completed(futures, timeout=STATS_BUDGET):
-            try:
-                results[futures[future]] = future.result()
-            except Exception:
-                pass
-    except Exception:
-        pass   # out of time, use what we have
-    finally:
-        for future in futures:
-            future.cancel()
-        pool.shutdown(wait=False)
+def record_success(model_id, ms):
+    now = time.time()
+    with _lock:
+        _observed.setdefault(model_id, {}).update(ms=ms, at=now, ok_at=now)
+
+
+def record_throttle(model_id):
+    with _lock:
+        _observed.setdefault(model_id, {})["throttled_at"] = time.time()
+
+
+def usage_snapshot(now=None):
+    now = now or time.time()
+    midnight = now - (now % 86400)   # start of the current UTC day
 
     with _lock:
-        _state["stats"] = results
-        _state["stats_at"] = time.time()
+        while _requests and _requests[0] < now - 86400:
+            _requests.popleft()
+        minute = sum(1 for moment in _requests if moment > now - 60)
+        day = sum(1 for moment in _requests if moment >= midnight)
 
-    return dict(results)
+    return {"minute": minute, "day": day}
+
+
+def live_info(stat, obs, now):
+    """Combine OpenRouter's stats with what this server has measured."""
+    known = bool(stat and stat.get("known"))
+    healthy = stat.get("healthy", True) if stat else True
+
+    throttled_at = obs.get("throttled_at")
+    ok_at = obs.get("ok_at")
+    recently_throttled = bool(throttled_at and now - throttled_at < THROTTLE_WINDOW)
+
+    if recently_throttled and (not ok_at or ok_at < throttled_at):
+        state = "throttled"
+    elif known and not healthy:
+        state = "degraded"
+    elif known or (ok_at and now - ok_at < MEASURED_MAX_AGE):
+        state = "healthy"
+    else:
+        state = "unknown"
+
+    stat_ms = stat.get("latency") if stat else None
+    measured_ms = obs.get("ms")
+    measured_age = now - obs["at"] if obs.get("at") is not None else None
+    measured_ok = measured_ms is not None and measured_age is not None and measured_age < MEASURED_MAX_AGE
+
+    if measured_ok and measured_age < MEASURED_FRESH:
+        source, ms, age = "measured", measured_ms, measured_age
+    elif stat_ms is not None:
+        source, ms, age = "openrouter", stat_ms, None
+    elif measured_ok:
+        source, ms, age = "measured", measured_ms, measured_age
+    else:
+        source, ms, age = None, None, None
+
+    return {
+        "state": state,
+        "latency_ms": ms,
+        "latency_source": source,
+        "latency_age_s": None if age is None else round(age),
+        "uptime": stat.get("uptime") if stat else None,
+        "throttled_age_s": round(now - throttled_at) if recently_throttled else None,
+    }
 
 
 def first_output(chunk):
@@ -691,6 +819,7 @@ def first_output(chunk):
 
 def probe_model(model_id):
     """Send a tiny request and time how long the first output takes."""
+    record_request()
     started = time.monotonic()
     stream = None
 
@@ -704,12 +833,21 @@ def probe_model(model_id):
 
         for chunk in stream:
             if first_output(chunk):
-                return {"ok": True, "ms": round((time.monotonic() - started) * 1000)}
+                ms = round((time.monotonic() - started) * 1000)
+                record_success(model_id, ms)
+                return {"ok": True, "ms": ms}
 
         return {"ok": False}
 
     except Exception as error:
-        print("[CRChatbot] probe of %s failed: %s" % (model_id, getattr(error, "message", error)))
+        status = getattr(error, "status_code", None)
+        print("[Afterworld] probe of %s failed (%s): %s"
+              % (model_id, status or type(error).__name__, getattr(error, "message", error)))
+
+        if status == 429:
+            record_throttle(model_id)
+            return {"ok": False, "throttled": True}
+
         return {"ok": False}
 
     finally:
@@ -827,13 +965,71 @@ def api_random_model():
     return {"model": public_model(model), "measured_ms": ms, "mode": mode, "note": note}
 
 
+class ProbeRequest(BaseModel):
+    model: str
+
+
+def iso(timestamp):
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+@app.get("/api/live")
+def api_live():
+    """Live numbers for the dashboard: speed and health per model, plus our request counter."""
+    try:
+        load_catalog()
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+    models = list_models()
+    stats = refresh_stats(models)
+    now = time.time()
+
+    with _lock:
+        observed = {key: dict(value) for key, value in _observed.items()}
+        stats_at = _state["stats_at"]
+
+    return {
+        "updated_at": iso(now),
+        "stats_at": iso(stats_at) if stats_at else None,
+        "models": {
+            model["id"]: live_info(stats.get(model["id"]), observed.get(model["id"], {}), now)
+            for model in models
+        },
+        "usage": usage_snapshot(now),
+        "limits": dict(FREE_LIMITS),
+    }
+
+
+@app.post("/api/probe")
+def api_probe(data: ProbeRequest):
+    """Test one model right now. This sends one small request, which counts toward the free limit."""
+    model = require_free_model(data.model)
+    result = probe_model(model["id"])
+
+    if result["ok"]:
+        message = "%s answered in %d ms." % (model["name"], result["ms"])
+    elif result.get("throttled"):
+        message = model["name"] + " is rate limited right now."
+    else:
+        message = model["name"] + " didn't answer."
+
+    return {
+        "ok": result["ok"],
+        "ms": result.get("ms"),
+        "throttled": bool(result.get("throttled")),
+        "message": message,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
 
 class Message(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    content: str = ""
+    images: List[str] = []      # images attached to a user message, as data URLs
 
 
 class ChatRequest(BaseModel):
@@ -841,20 +1037,37 @@ class ChatRequest(BaseModel):
     messages: List[Message]
 
 
+def message_content(text, images):
+    """Plain text, or text plus images in the format OpenRouter expects."""
+    if not images:
+        return text
+
+    parts = []
+    if text:
+        parts.append({"type": "text", "text": text})
+    for url in images:
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    return parts
+
+
 def build_messages(items):
     """Turn the chat history sent by the browser into a clean message list."""
     cleaned = []
 
     for item in items:
-        content = item.content.strip()
-        if not content:
+        text = item.content.strip()
+        images = list(getattr(item, "images", None) or []) if item.role == "user" else []
+
+        if not text and not images:
             continue
 
         # Some models reject two messages in a row from the same role, so merge them
         if cleaned and cleaned[-1]["role"] == item.role:
-            cleaned[-1]["content"] += "\n\n" + content
+            previous = cleaned[-1]
+            previous["text"] = "\n\n".join(part for part in (previous["text"], text) if part)
+            previous["images"].extend(images)
         else:
-            cleaned.append({"role": item.role, "content": content})
+            cleaned.append({"role": item.role, "text": text, "images": images})
 
     cleaned = cleaned[-MAX_HISTORY:]
 
@@ -862,7 +1075,14 @@ def build_messages(items):
     while cleaned and cleaned[0]["role"] != "user":
         cleaned.pop(0)
 
-    return [{"role": "system", "content": SYSTEM_PROMPT}] + cleaned
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for entry in cleaned:
+        messages.append({
+            "role": entry["role"],
+            "content": message_content(entry["text"], entry["images"])
+        })
+
+    return messages
 
 
 def merge_system(messages):
@@ -871,9 +1091,41 @@ def merge_system(messages):
     rest = [dict(message) for message in messages[1:]]
 
     if rest and rest[0]["role"] == "user":
-        rest[0]["content"] = system + "\n\n" + rest[0]["content"]
+        content = rest[0]["content"]
+
+        if isinstance(content, list):
+            rest[0]["content"] = [{"type": "text", "text": system}] + content
+        else:
+            rest[0]["content"] = system + "\n\n" + content
 
     return rest
+
+
+def check_images(items, model):
+    """Images are only allowed for models that accept image input, and only real image data URLs."""
+    urls = []
+    for item in items:
+        if item.role == "user":
+            urls.extend(getattr(item, "images", None) or [])
+
+    if not urls:
+        return
+
+    if not model.get("vision"):
+        raise HTTPException(
+            status_code=400,
+            detail=model["name"] + " doesn't accept images. Choose a model with image input."
+        )
+
+    if len(urls) > MAX_IMAGES:
+        raise HTTPException(status_code=400, detail="Too many images in one request.")
+
+    for url in urls:
+        if len(url) > MAX_IMAGE_CHARS or not IMAGE_URL.fullmatch(url):
+            raise HTTPException(
+                status_code=400,
+                detail="One of the images isn't a valid PNG, JPEG, WebP or GIF, or it is too large."
+            )
 
 
 def describe_error(error, name="This model"):
@@ -900,17 +1152,25 @@ def describe_error(error, name="This model"):
 
 
 def first_token(iterator):
-    """Read the stream until the first piece of answer text arrives."""
+    """Read the stream until the first piece of answer text arrives.
+
+    Returns the text and the moment the model first produced anything (reasoning included).
+    """
+    first_at = None
+
     for chunk in iterator:
+        if first_at is None and first_output(chunk):
+            first_at = time.monotonic()
+
         if not chunk.choices:
             continue
 
         token = chunk.choices[0].delta.content
 
         if token:
-            return token
+            return token, first_at or time.monotonic()
 
-    return None
+    return None, None
 
 
 def open_stream(model, messages):
@@ -927,6 +1187,9 @@ def open_stream(model, messages):
         attempt += 1
         stream = None
 
+        record_request()
+        started = time.monotonic()
+
         try:
             stream = client.chat.completions.create(
                 model=model["id"],
@@ -936,14 +1199,15 @@ def open_stream(model, messages):
             )
 
             iterator = iter(stream)
-            token = first_token(iterator)
+            token, first_at = first_token(iterator)
 
             if token is not None:
+                record_success(model["id"], round((first_at - started) * 1000))
                 return token, iterator, stream
 
             stream.close()
             last_message = "The model returned an empty reply. Try again or choose another model."
-            print("[CRChatbot] %s returned an empty reply" % model["id"])
+            print("[Afterworld] %s returned an empty reply" % model["id"])
 
         except openai.APIError as error:
             if stream is not None:
@@ -951,8 +1215,11 @@ def open_stream(model, messages):
 
             status = getattr(error, "status_code", None)
             last_message = describe_error(error, model["name"])
-            print("[CRChatbot] %s failed (%s): %s"
+            print("[Afterworld] %s failed (%s): %s"
                   % (model["id"], status or type(error).__name__, getattr(error, "message", error)))
+
+            if status == 429:
+                record_throttle(model["id"])
 
             if status in FATAL_STATUSES:
                 break
@@ -1001,6 +1268,7 @@ def require_free_model(model_id):
 def chat(data: ChatRequest):
 
     model = require_free_model(data.model)
+    check_images(data.messages, model)
     messages = build_messages(data.messages)
 
     if len(messages) < 2:
