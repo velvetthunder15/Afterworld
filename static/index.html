@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#071433">
-    <title>CRChatbot Version 1.0.4</title>
+    <title>Afterworld 1.1.0</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1001,7 +1001,7 @@
         <div class="brand">
             <div class="avatar" aria-hidden="true"><svg><use href="#icon-bot"/></svg></div>
             <div class="brand-text">
-                <div class="brand-name">CRChatbot Version 1.0.4</div>
+                <div class="brand-name">Afterworld 1.1.0</div>
                 <div class="model" id="model-label">Choose a model</div>
             </div>
         </div>
@@ -1129,7 +1129,7 @@
 
             <div id="input-area">
                 <form id="form" autocomplete="off">
-                    <textarea id="message" rows="1" placeholder="Message CRChatbot" aria-label="Message"></textarea>
+                    <textarea id="message" rows="1" placeholder="Message Afterworld" aria-label="Message"></textarea>
 
                     <button class="send" id="send" type="submit" aria-label="Send message" disabled>
                         <svg class="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -1144,7 +1144,7 @@
 </div>
 
 <script>
-const APP_NAME = "CRChatbot Version 1.0.4";
+const APP_NAME = "Afterworld 1.1.0";
 const NETWORK_ERROR = "Couldn't reach the server. Check that main.py is running, then try again.";
 const STORE_CHATS = "crchatbot.chats.v2";
 const STORE_ACTIVE = "crchatbot.active.v2";
@@ -1635,7 +1635,7 @@ function renderBanner() {
 
 function setComposerModel() {
     const model = currentModel();
-    input.placeholder = model ? "Message " + model.name : "Message CRChatbot";
+    input.placeholder = model ? "Message " + model.name : "Message Afterworld";
 }
 
 /* ==========================================================
@@ -1919,7 +1919,7 @@ function createAssistantView(modelId) {
         '<div class="avatar sm" aria-hidden="true"><svg><use href="#icon-bot"/></svg></div>' +
         '<div class="body">' +
             '<div class="who"><span class="who-name"></span><span class="model msg-model"></span></div>' +
-            '<div class="content"><span class="typing" role="status" aria-label="CRChatbot is typing"><i></i><i></i><i></i></span></div>' +
+            '<div class="content"><span class="typing" role="status" aria-label="Afterworld is typing"><i></i><i></i><i></i></span></div>' +
             '<div class="actions"></div>' +
         "</div>";
 
