@@ -3,26 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#071433">
-    <title>Afterworld 1.1.0</title>
+    <meta name="theme-color" content="#0a1224">
+    <title>Afterworld</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- separate request, so a problem with the code font can never affect the main font -->
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500&display=swap" rel="stylesheet">
 
     <style>
         :root {
-            --bg: #050d24;
-            --blue: #2563eb;
+            --bg: #0a1224;
+            --bg-side: #081020;
+            --surface: #0f1a33;
+            --surface-2: #15233f;
+            --line: #1c2b4d;
+            --line-strong: #2a3d68;
+            --text: #e8eef9;
+            --muted: #93a4c3;
+            --faint: #6b7d9e;
             --sky: #38bdf8;
-            --sky-soft: #7dd3fc;
-            --text: #eaf3ff;
-            --muted: #8fa8cf;
-            --line: rgba(125, 180, 255, 0.16);
-            --panel: rgba(13, 30, 76, 0.62);
-            --grad: linear-gradient(135deg, #1e40ff 0%, #2f7cff 45%, #38bdf8 100%);
-            --font: "Manrope", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-            --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+            --grad: linear-gradient(135deg, #2f6bff 0%, #38bdf8 100%);
+            --ok: #34d399;
+            --warn: #fbbf24;
+            --bad: #f87171;
+            --font: "Google Sans", "Google Sans Flex", "Product Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --mono: "Google Sans Code", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
         }
 
         * { box-sizing: border-box; }
@@ -35,167 +42,155 @@
             display: flex;
             flex-direction: column;
             height: 100dvh;
-            font-family: var(--font);
+            background: var(--bg);
             color: var(--text);
-            background:
-                radial-gradient(900px 520px at 12% -12%, rgba(37, 99, 235, 0.5), transparent 60%),
-                radial-gradient(760px 480px at 100% 0%, rgba(56, 189, 248, 0.26), transparent 55%),
-                linear-gradient(180deg, #071433 0%, var(--bg) 100%);
-            background-attachment: fixed;
+            font: 400 15px/1.5 var(--font);
+            -webkit-font-smoothing: antialiased;
         }
 
-        :focus-visible {
-            outline: 2px solid var(--sky);
-            outline-offset: 2px;
-        }
+        button, input, select, textarea { font: inherit; color: inherit; }
+        button { cursor: pointer; }
+        :focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
 
-        /* ---------- Icon tiles ---------- */
-        .avatar {
+        /* ---------- Buttons ---------- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            height: 36px;
+            padding: 0 14px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: transparent;
+            font-weight: 500;
+            font-size: 14px;
+            white-space: nowrap;
+            transition: background 0.12s, border-color 0.12s, filter 0.12s;
+        }
+        .btn:hover { background: var(--surface-2); }
+        .btn svg { width: 17px; height: 17px; flex: none; }
+        .btn[aria-current="page"] { background: var(--surface-2); border-color: var(--sky); }
+
+        .btn-primary {
+            border-color: transparent;
+            background: var(--grad);
+            color: #fff;
+        }
+        .btn-primary:hover { background: var(--grad); filter: brightness(1.08); }
+        .btn-lg { height: 48px; padding: 0 22px; border-radius: 10px; font-size: 16px; }
+
+        .btn-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: var(--text);
+            font-weight: 500;
+            font-size: 15px;
+            text-decoration: underline;
+            text-decoration-color: var(--line-strong);
+            text-underline-offset: 5px;
+        }
+        .btn-link:hover { text-decoration-color: var(--sky); }
+        .btn-link svg { width: 16px; height: 16px; }
+
+        .icon-btn {
+            display: inline-grid;
+            place-items: center;
+            flex: none;
+            width: 38px;
+            height: 38px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text);
+        }
+        .icon-btn:hover:not(:disabled) { background: var(--surface-2); }
+        .icon-btn svg { width: 20px; height: 20px; }
+
+        /* ---------- Logo ---------- */
+        .mark-tile {
             display: grid;
             place-items: center;
             flex: none;
-            width: 40px;
-            height: 40px;
-            border-radius: 13px;
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
             background: var(--grad);
-            box-shadow: 0 8px 22px -8px rgba(56, 189, 248, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.35);
         }
-        .avatar svg { width: 23px; height: 23px; }
-        .avatar.sm { width: 32px; height: 32px; border-radius: 10px; }
-        .avatar.sm svg { width: 19px; height: 19px; }
-        .avatar.lg {
-            width: 80px;
-            height: 80px;
-            border-radius: 26px;
-            box-shadow: 0 18px 60px -12px rgba(56, 189, 248, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-        }
-        .avatar.lg svg { width: 46px; height: 46px; }
+        .mark-tile svg { width: 21px; height: 21px; }
+        .mark-tile.sm { width: 26px; height: 26px; border-radius: 7px; }
+        .mark-tile.sm svg { width: 16px; height: 16px; }
 
         .tile {
             display: grid;
             place-items: center;
             flex: none;
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
+            width: 36px;
+            height: 36px;
+            border-radius: 9px;
             color: #fff;
-            font-weight: 800;
-            font-size: 17px;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 18px -10px rgba(0, 0, 0, 0.6);
+            font-weight: 700;
+            font-size: 15px;
         }
-        .tile.sm { width: 34px; height: 34px; border-radius: 10px; font-size: 15px; }
+        .tile.sm { width: 30px; height: 30px; border-radius: 8px; font-size: 13px; }
 
-        /* ---------- Header ---------- */
-        header {
-            position: relative;
-            z-index: 2;
+        /* ---------- Top bar ---------- */
+        .topbar {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 12px 20px;
+            flex: none;
+            height: 60px;
+            padding: 0 20px;
             border-bottom: 1px solid var(--line);
-            background: rgba(6, 18, 48, 0.6);
-            -webkit-backdrop-filter: blur(14px);
-            backdrop-filter: blur(14px);
         }
+        .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 
-        .brand-wrap { display: flex; align-items: center; gap: 12px; min-width: 0; }
-        .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-        .brand-text { display: flex; flex-direction: column; min-width: 0; }
-        .brand-name {
-            font-size: 15px;
-            font-weight: 800;
-            letter-spacing: 0.1px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            min-width: 0;
+            padding: 0;
+            border: 0;
+            background: none;
+            text-align: left;
         }
+        .brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+        .brand-name { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
         .model {
             margin-top: 1px;
             font-size: 10.5px;
             line-height: 1.3;
-            color: var(--sky-soft);
-            opacity: 0.75;
+            color: var(--sky);
+            opacity: 0.85;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
         .model:empty { display: none; }
+        .menu-btn { display: none; }
 
-        .icon-btn {
-            display: none;
-            place-items: center;
-            flex: none;
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            border: 1px solid var(--line);
-            background: rgba(37, 99, 235, 0.14);
-            color: var(--text);
-            cursor: pointer;
-        }
-        .icon-btn:hover { background: rgba(37, 99, 235, 0.32); }
-        .icon-btn svg { width: 20px; height: 20px; }
-
-        .ghost-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            flex: none;
-            padding: 9px 14px;
-            border-radius: 12px;
-            border: 1px solid var(--line);
-            background: rgba(37, 99, 235, 0.14);
-            color: var(--text);
-            font: 700 13px var(--font);
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
-        }
-        .ghost-btn:hover { background: rgba(37, 99, 235, 0.32); border-color: rgba(56, 189, 248, 0.5); }
-        .ghost-btn[aria-current="page"] { background: rgba(56, 189, 248, 0.18); border-color: rgba(56, 189, 248, 0.5); }
-        .ghost-btn svg { width: 16px; height: 16px; }
-
-        /* ---------- App layout ---------- */
+        /* ---------- Layout ---------- */
         .app { flex: 1; display: flex; min-height: 0; }
 
         .sidebar {
-            width: 280px;
-            flex: none;
             display: flex;
             flex-direction: column;
+            flex: none;
+            width: 268px;
             min-height: 0;
             border-right: 1px solid var(--line);
-            background: rgba(5, 14, 40, 0.5);
+            background: var(--bg-side);
         }
-
-        .side-top { padding: 14px 14px 6px; }
-
-        .new-btn {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 11px 14px;
-            border: 0;
-            border-radius: 14px;
-            background: var(--grad);
-            color: #fff;
-            font: 700 14px var(--font);
-            cursor: pointer;
-            box-shadow: 0 10px 24px -12px rgba(56, 189, 248, 0.9);
-            transition: transform 0.15s;
-        }
-        .new-btn:hover { transform: translateY(-1px); }
-        .new-btn svg { width: 18px; height: 18px; }
-
-        .side-label {
-            padding: 14px 20px 6px;
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--muted);
-        }
+        .side-top { padding: 14px; }
+        .side-top .btn { width: 100%; height: 40px; }
+        .side-label { padding: 6px 20px 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
 
         .chat-list-wrap {
             flex: 1;
@@ -203,623 +198,467 @@
             overflow-y: auto;
             padding: 0 10px 12px;
             scrollbar-width: thin;
-            scrollbar-color: rgba(56, 189, 248, 0.3) transparent;
+            scrollbar-color: var(--line-strong) transparent;
         }
+        .chat-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
 
-        .chat-list {
-            list-style: none;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .chat-row {
-            display: flex;
-            align-items: center;
-            border-radius: 12px;
-            transition: background 0.15s;
-        }
-        .chat-row:hover { background: rgba(37, 99, 235, 0.18); }
-        .chat-row.active {
-            background: linear-gradient(135deg, rgba(30, 64, 255, 0.4), rgba(56, 189, 248, 0.2));
-            box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
-        }
-
+        .chat-row { display: flex; align-items: center; border-radius: 8px; }
+        .chat-row:hover { background: var(--surface); }
+        .chat-row.active { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--sky); }
         .chat-item {
             flex: 1;
             min-width: 0;
             padding: 9px 12px;
             border: 0;
-            border-radius: 12px;
+            border-radius: 8px;
             background: transparent;
-            color: var(--text);
             text-align: left;
-            font: 500 13.5px/1.3 var(--font);
-            cursor: pointer;
+            font-size: 14px;
+            line-height: 1.3;
         }
-        .chat-title,
-        .chat-model {
+        .chat-title, .chat-model {
             display: block;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .chat-model {
-            margin-top: 2px;
-            font-size: 10.5px;
-            color: var(--sky-soft);
-            opacity: 0.7;
-        }
+        .chat-title { font-weight: 500; }
+        .chat-model { margin-top: 2px; font-size: 11px; color: var(--faint); }
 
         .chat-del {
             display: grid;
             place-items: center;
             flex: none;
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             margin-right: 6px;
             border: 0;
-            border-radius: 9px;
+            border-radius: 6px;
             background: transparent;
             color: var(--muted);
-            cursor: pointer;
             opacity: 0;
-            transition: opacity 0.15s, background 0.15s, color 0.15s;
         }
-        .chat-row:hover .chat-del,
-        .chat-row:focus-within .chat-del,
-        .chat-row.active .chat-del { opacity: 1; }
-        .chat-del:hover { background: rgba(255, 90, 90, 0.18); color: #ffb4b4; }
-        .chat-del svg { width: 16px; height: 16px; }
+        .chat-row:hover .chat-del, .chat-row:focus-within .chat-del, .chat-row.active .chat-del { opacity: 1; }
+        .chat-del:hover { background: rgba(248, 113, 113, 0.16); color: var(--bad); }
+        .chat-del svg { width: 15px; height: 15px; }
         @media (hover: none) { .chat-del { opacity: 1; } }
 
-        .chat-empty {
-            margin: 6px 12px;
-            font-size: 12.5px;
-            line-height: 1.5;
-            color: #6f8ab8;
-        }
+        .chat-empty { margin: 6px 12px; font-size: 13px; line-height: 1.5; color: var(--faint); }
+        .side-foot { padding: 12px 20px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
 
-        .side-foot {
-            padding: 10px 20px 14px;
-            border-top: 1px solid var(--line);
-            font-size: 11.5px;
-            color: #6f8ab8;
-        }
+        .scrim { position: fixed; inset: 0; z-index: 25; background: rgba(2, 6, 16, 0.65); }
 
-        .scrim {
-            position: fixed;
-            inset: 0;
-            z-index: 25;
-            background: rgba(2, 8, 24, 0.62);
-        }
-
-        .workspace {
-            flex: 1;
-            min-width: 0;
-            min-height: 0;
-            display: flex;
-            flex-direction: column;
-        }
-
+        .workspace { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
         .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
         /* ==========================================================
-           Dashboard
+           Front page / model dashboard
            ========================================================== */
         #view-dashboard {
             overflow-y: auto;
-            padding: 30px 24px 48px;
+            padding: 0 28px 56px;
             scrollbar-width: thin;
-            scrollbar-color: rgba(56, 189, 248, 0.35) transparent;
+            scrollbar-color: var(--line-strong) transparent;
         }
-        .dash { width: 100%; max-width: 1120px; margin: 0 auto; }
+        .dash { container: dash / inline-size; width: 100%; max-width: 1180px; margin: 0 auto; }
 
-        .hero { animation: rise 0.6s ease both; }
-        .eyebrow {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            margin: 0 0 14px;
-            padding: 6px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(56, 189, 248, 0.35);
-            background: rgba(56, 189, 248, 0.1);
-            color: var(--sky-soft);
-            font-size: 12px;
-            font-weight: 700;
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 340px;
+            gap: 48px;
+            align-items: end;
+            padding: 56px 0 44px;
         }
-        .eyebrow i {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--sky);
-            box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.2);
-        }
-        .hero h1 {
-            margin: 0;
-            font-size: clamp(28px, 4.6vw, 42px);
-            font-weight: 800;
-            letter-spacing: -0.8px;
-            line-height: 1.1;
-        }
-        .lede {
-            max-width: 640px;
-            margin: 12px 0 0;
-            color: var(--muted);
-            font-size: 15.5px;
-            line-height: 1.6;
-        }
-
-        .random-card {
-            position: relative;
-            overflow: hidden;
+        .hero-kicker { margin: 0 0 16px; font-size: 13px; font-weight: 500; color: var(--sky); letter-spacing: 0.02em; }
+        .wordmark {
             display: flex;
             align-items: center;
-            gap: 20px;
-            margin-top: 26px;
-            padding: 22px 24px;
-            border-radius: 24px;
-            border: 1px solid rgba(125, 200, 255, 0.35);
-            background: linear-gradient(120deg, rgba(30, 64, 255, 0.62) 0%, rgba(47, 124, 255, 0.5) 50%, rgba(56, 189, 248, 0.4) 100%);
-            box-shadow: 0 30px 70px -36px rgba(56, 189, 248, 0.8);
-            animation: rise 0.7s 0.05s ease both;
+            gap: 0.2em;
+            margin: 0;
+            font-size: clamp(56px, 9vw, 104px);
+            font-weight: 700;
+            line-height: 0.95;
+            letter-spacing: -0.045em;
         }
-        .random-card::before {
-            content: "";
-            position: absolute;
-            top: -120px;
-            right: -60px;
-            width: 340px;
-            height: 340px;
-            background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 65%);
-            pointer-events: none;
-        }
-        .random-icon {
-            position: relative;
-            display: grid;
-            place-items: center;
+        .wm-mark {
             flex: none;
-            width: 56px;
-            height: 56px;
-            border-radius: 18px;
-            background: rgba(255, 255, 255, 0.16);
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            width: 0.62em;
+            height: 0.62em;
+            padding: 0.1em;
+            border-radius: 0.15em;
+            background: var(--grad);
         }
-        .random-icon svg { width: 28px; height: 28px; }
-        .random-text { position: relative; flex: 1; min-width: 0; }
-        .random-text h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
-        .random-text p { margin: 0; font-size: 14px; line-height: 1.55; color: #dcecff; }
-        .random-text p.err { color: #ffd0d0; }
+        .hero-lede { margin: 22px 0 0; font-size: clamp(20px, 2.4vw, 26px); font-weight: 500; letter-spacing: -0.01em; }
+        .hero-sub { max-width: 540px; margin: 8px 0 0; color: var(--muted); font-size: 16px; line-height: 1.55; }
+        .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; margin-top: 28px; }
+        .hero-note { min-height: 20px; margin: 12px 0 0; font-size: 13px; color: var(--faint); }
+        .hero-note.err { color: var(--bad); }
 
-        .random-btn {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            flex: none;
-            min-width: 178px;
-            padding: 13px 20px;
-            border: 0;
-            border-radius: 14px;
-            background: #ffffff;
-            color: #0a2a80;
-            font: 800 14.5px var(--font);
-            cursor: pointer;
-            box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.6);
-            transition: transform 0.15s;
-        }
-        .random-btn:hover:not(:disabled) { transform: translateY(-1px); }
-        .random-btn:disabled { opacity: 0.9; cursor: progress; }
-        .random-btn svg { width: 18px; height: 18px; }
         .spinner {
             display: none;
+            flex: none;
             width: 16px;
             height: 16px;
             border-radius: 50%;
-            border: 2.5px solid rgba(10, 42, 128, 0.25);
-            border-top-color: #0a2a80;
+            border: 2.5px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
             animation: spin 0.8s linear infinite;
         }
-        .random-btn.busy .spinner { display: block; }
-        .random-btn.busy .bolt { display: none; }
+        #random-btn.busy .spinner { display: block; }
+        #random-btn.busy .bolt { display: none; }
+        #random-btn:disabled { cursor: progress; filter: none; }
 
-        .controls {
+        .live {
+            padding: 18px 20px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--surface);
+        }
+        .live-head { display: flex; align-items: center; gap: 10px; }
+        .live-head h2 { margin: 0; font-size: 14px; font-weight: 700; }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+        .live-dot.on { background: var(--ok); }
+        .live-stamp { margin-left: auto; font-size: 12px; color: var(--faint); }
+        .live-list { display: grid; gap: 14px; margin: 16px 0 0; }
+        .live-list dt { margin-bottom: 2px; font-size: 12px; color: var(--muted); }
+        .live-list dd { margin: 0; font-size: 15px; }
+        .live-list dd b { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .live-list dd .muted { color: var(--faint); font-size: 13px; }
+        .meter { height: 4px; margin-top: 8px; border-radius: 2px; background: var(--line); overflow: hidden; }
+        .meter i { display: block; width: 0; height: 100%; background: var(--grad); transition: width 0.3s; }
+        .meter i.hot { background: var(--warn); }
+        .live-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.55; color: var(--faint); }
+
+        .toolbar {
             display: flex;
             flex-wrap: wrap;
-            align-items: center;
-            gap: 12px;
-            margin-top: 30px;
+            align-items: flex-end;
+            gap: 14px 20px;
+            padding-top: 26px;
+            border-top: 1px solid var(--line);
         }
-        .search { position: relative; flex: 1 1 240px; min-width: 200px; }
+        .search { position: relative; flex: 1 1 260px; min-width: 220px; }
         .search svg {
             position: absolute;
-            left: 14px;
+            left: 12px;
             top: 50%;
-            width: 18px;
-            height: 18px;
+            width: 17px;
+            height: 17px;
             color: var(--muted);
             transform: translateY(-50%);
             pointer-events: none;
         }
         .search input {
             width: 100%;
-            padding: 12px 14px 12px 42px;
-            border-radius: 14px;
-            border: 1px solid var(--line);
-            background: var(--panel);
-            color: var(--text);
-            font: 500 14.5px var(--font);
+            height: 40px;
+            padding: 0 12px 0 38px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: var(--surface);
+            font-size: 14.5px;
             outline: none;
-            transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .search input::placeholder { color: #6f8ab8; }
-        .search input:focus { border-color: rgba(56, 189, 248, 0.65); box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12); }
+        .search input::placeholder { color: var(--faint); }
+        .search input:focus { border-color: var(--sky); }
+
+        .field { display: flex; flex-direction: column; gap: 6px; }
+        .field-label { font-size: 12px; font-weight: 500; color: var(--muted); }
 
         .seg {
             display: flex;
-            gap: 4px;
             max-width: 100%;
-            padding: 4px;
-            border-radius: 14px;
-            border: 1px solid var(--line);
-            background: rgba(5, 14, 40, 0.55);
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: var(--surface);
             overflow-x: auto;
             scrollbar-width: none;
         }
         .seg::-webkit-scrollbar { display: none; }
         .seg button {
+            height: 38px;
+            padding: 0 14px;
             border: 0;
-            border-radius: 10px;
-            padding: 8px 13px;
+            border-right: 1px solid var(--line);
             background: transparent;
             color: var(--muted);
-            font: 700 13px var(--font);
+            font-size: 13.5px;
+            font-weight: 500;
             white-space: nowrap;
-            cursor: pointer;
-            transition: color 0.15s, background 0.15s;
         }
+        .seg button:last-child { border-right: 0; }
         .seg button:hover { color: var(--text); }
-        .seg button[aria-pressed="true"] {
-            background: var(--grad);
-            color: #fff;
-            box-shadow: 0 8px 18px -10px rgba(56, 189, 248, 0.9);
-        }
+        .seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--sky); }
 
-        .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
-        .filter-label { margin-right: 2px; color: var(--muted); font-size: 12px; font-weight: 700; }
-        .filter-chip {
-            padding: 6px 13px;
-            border-radius: 999px;
-            border: 1px solid var(--line);
-            background: rgba(20, 45, 105, 0.35);
-            color: var(--text);
-            font: 700 12.5px var(--font);
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
+        select {
+            height: 40px;
+            padding: 0 34px 0 12px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: var(--surface) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2393a4c3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 12px center;
+            font-size: 14px;
+            appearance: none;
         }
-        .filter-chip:hover { border-color: rgba(56, 189, 248, 0.5); }
-        .filter-chip[aria-pressed="true"] {
-            background: rgba(56, 189, 248, 0.22);
-            border-color: rgba(56, 189, 248, 0.7);
-            color: #fff;
-        }
+        select:focus-visible { outline-offset: 0; }
 
-        .meta {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 6px 12px;
-            margin-top: 18px;
+        .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+        .filter-label { margin-right: 2px; font-size: 12px; font-weight: 500; color: var(--muted); }
+        .toggle {
+            height: 30px;
+            padding: 0 12px;
+            border: 1px solid var(--line-strong);
+            border-radius: 8px;
+            background: transparent;
             color: var(--muted);
-            font-size: 12.5px;
+            font-size: 13px;
+            font-weight: 500;
         }
+        .toggle:hover { color: var(--text); }
+        .toggle[aria-pressed="true"] { border-color: var(--sky); background: rgba(56, 189, 248, 0.1); color: var(--text); }
+
+        .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 20px; font-size: 13px; color: var(--muted); }
         .link-btn {
             padding: 0;
             border: 0;
             background: none;
-            color: var(--sky-soft);
-            font: 700 12.5px var(--font);
+            color: var(--sky);
+            font-size: 13px;
+            font-weight: 500;
             text-decoration: underline;
             text-underline-offset: 3px;
-            cursor: pointer;
         }
+        .link-btn:disabled { color: var(--faint); cursor: default; }
 
-        .group { margin-top: 30px; }
-        .group-note { margin: 22px 0 0; color: var(--muted); font-size: 13.5px; }
-        .group-note b { color: var(--text); }
-        .group-head { display: flex; align-items: center; gap: 10px; }
-        .group-title { margin: 0; font-size: 17px; font-weight: 800; }
-        .group-count {
-            padding: 2px 10px;
-            border-radius: 999px;
-            background: rgba(56, 189, 248, 0.14);
-            color: var(--sky-soft);
-            font-size: 12px;
-            font-weight: 800;
-        }
-
-        .grid {
+        /* ----- model list ----- */
+        .list { --cols: minmax(230px, 3fr) 78px 96px 150px 150px minmax(120px, 1.6fr) 24px; margin-top: 8px; }
+        .list-head {
+            position: sticky;
+            top: 0;
+            z-index: 5;
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(292px, 1fr));
-            gap: 14px;
-            margin-top: 14px;
+            grid-template-columns: var(--cols);
+            column-gap: 16px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--line-strong);
+            background: var(--bg);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--muted);
         }
+        .group { margin-top: 26px; }
+        .group-head { display: flex; align-items: baseline; gap: 10px; padding: 0 12px 10px; }
+        .group-title { margin: 0; font-size: 16px; font-weight: 700; }
+        .group-count { font-size: 13px; color: var(--faint); }
+        .rows { border-top: 1px solid var(--line); }
 
-        .model-card {
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            padding: 16px;
-            border-radius: 20px;
-            border: 1px solid var(--line);
-            background: linear-gradient(180deg, rgba(22, 48, 110, 0.55), rgba(10, 26, 68, 0.55));
-            color: var(--text);
-            text-align: left;
-            font: inherit;
+        .row {
+            display: grid;
+            grid-template-columns: var(--cols);
+            column-gap: 16px;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid var(--line);
             cursor: pointer;
-            animation: rise 0.35s ease both;
-            transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+            transition: background 0.12s;
         }
-        .model-card:hover {
-            transform: translateY(-3px);
-            border-color: rgba(56, 189, 248, 0.6);
-            box-shadow: 0 22px 44px -26px rgba(56, 189, 248, 0.8);
-        }
-        .mc-top { display: flex; align-items: center; gap: 12px; }
-        .mc-names { min-width: 0; }
-        .mc-name { display: block; font-size: 15px; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere; }
-        .mc-provider { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
-        .mc-desc {
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            margin: 0;
-            color: #b9cbe8;
-            font-size: 13px;
-            line-height: 1.55;
-        }
-        .mc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-        .mc-stat {
-            padding: 8px 10px;
-            border-radius: 12px;
-            border: 1px solid var(--line);
-            background: rgba(5, 14, 40, 0.5);
-            min-width: 0;
-        }
-        .mc-stat b {
+        .row:hover { background: var(--surface); }
+        .row:focus-visible { outline-offset: -2px; }
+        .cell { min-width: 0; }
+        .cell .v {
             display: block;
-            font-size: 14px;
-            font-weight: 800;
+            font-size: 14.5px;
+            font-weight: 500;
             font-variant-numeric: tabular-nums;
             white-space: nowrap;
         }
-        .mc-stat span {
+        .cell .v.muted { color: var(--faint); }
+        .cell .s {
             display: block;
             margin-top: 1px;
-            color: var(--muted);
-            font-size: 10.5px;
+            font-size: 12px;
+            color: var(--faint);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .cell.c-model { display: flex; align-items: center; gap: 12px; }
+        .model-text { min-width: 0; }
+        .model-name { display: block; overflow: hidden; font-size: 15px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+        .model-desc { margin-top: 2px; overflow: hidden; font-size: 12.5px; color: var(--faint); white-space: nowrap; text-overflow: ellipsis; }
+        .model-desc .prov { color: var(--muted); font-weight: 500; }
+
+        .lat-line { display: flex; align-items: baseline; gap: 10px; }
+        .test-btn {
+            padding: 0;
+            border: 0;
+            background: none;
+            color: var(--sky);
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            opacity: 0.75;
+        }
+        .row:hover .test-btn, .test-btn:focus-visible { opacity: 1; }
+        .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--faint); vertical-align: 1px; }
+        .dot.ok { background: var(--ok); }
+        .dot.warn { background: var(--warn); }
+
         .tags { display: flex; flex-wrap: wrap; gap: 6px; }
         .tag {
-            padding: 3px 9px;
-            border-radius: 999px;
-            border: 1px solid rgba(56, 189, 248, 0.35);
-            background: rgba(56, 189, 248, 0.1);
-            color: var(--sky-soft);
-            font-size: 11px;
-            font-weight: 700;
-            white-space: nowrap;
-        }
-        .tag.warn { border-color: rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.1); color: #fcd34d; }
-        .tag.random { border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.14); color: #fff; }
-        .mc-foot {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: auto;
+            display: inline-block;
+            height: 22px;
+            padding: 0 8px;
+            border: 1px solid var(--line-strong);
+            border-radius: 6px;
             color: var(--muted);
             font-size: 11.5px;
+            font-weight: 500;
+            line-height: 20px;
+            white-space: nowrap;
         }
-        .mc-go { display: inline-flex; align-items: center; gap: 6px; color: var(--sky-soft); font-size: 12.5px; font-weight: 800; }
-        .mc-go svg { width: 15px; height: 15px; transition: transform 0.15s; }
-        .model-card:hover .mc-go svg { transform: translateX(3px); }
+        .tag.accent { border-color: rgba(56, 189, 248, 0.55); color: var(--sky); }
+        .tag.warn { border-color: rgba(251, 191, 36, 0.55); color: var(--warn); }
 
-        .skeleton {
-            height: 232px;
-            border-radius: 20px;
-            border: 1px solid var(--line);
-            background: linear-gradient(100deg, rgba(20, 45, 105, 0.35) 30%, rgba(56, 189, 248, 0.14) 50%, rgba(20, 45, 105, 0.35) 70%);
-            background-size: 220% 100%;
-            animation: shimmer 1.4s linear infinite;
-        }
+        .go { display: grid; place-items: center; color: var(--faint); transition: color 0.12s, transform 0.12s; }
+        .go svg { width: 18px; height: 18px; }
+        .row:hover .go { color: var(--sky); transform: translateX(2px); }
 
-        .state-box {
-            margin-top: 26px;
-            padding: 26px;
-            border-radius: 20px;
-            border: 1px dashed rgba(125, 180, 255, 0.3);
-            background: rgba(10, 26, 68, 0.35);
-            text-align: center;
-            color: var(--muted);
-            line-height: 1.6;
-        }
+        .skeleton-row { height: 62px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.05), transparent); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
+
+        .state-box { margin-top: 28px; padding: 28px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); text-align: center; line-height: 1.6; }
         .state-box b { display: block; margin-bottom: 4px; color: var(--text); font-size: 16px; }
-        .state-box .ghost-btn { margin-top: 14px; }
-        .state-box.err { border-color: rgba(255, 140, 140, 0.4); }
+        .state-box .btn { margin-top: 16px; }
+        .state-box.err { border-color: rgba(248, 113, 113, 0.5); }
 
-        .fine { margin: 34px 0 0; color: #6f8ab8; font-size: 12px; line-height: 1.6; }
+        .fine { max-width: 820px; margin: 36px 0 0; font-size: 12.5px; line-height: 1.65; color: var(--faint); }
+
+        @container dash (max-width: 900px) {
+            .hero { grid-template-columns: 1fr; gap: 32px; padding: 36px 0 30px; }
+            .list-head { display: none; }
+            .row { grid-template-columns: 1fr 1fr; row-gap: 14px; padding: 16px 4px; }
+            .cell.c-model, .cell.features { grid-column: 1 / -1; }
+            .cell.go { display: none; }
+            .cell[data-label]::before {
+                display: block;
+                margin-bottom: 2px;
+                content: attr(data-label);
+                font-size: 11.5px;
+                font-weight: 500;
+                color: var(--muted);
+            }
+            .model-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+        }
 
         /* ==========================================================
-           Chat view
+           Chat
            ========================================================== */
         .banner {
             display: flex;
             align-items: center;
             flex-wrap: wrap;
-            gap: 10px 16px;
-            padding: 10px 20px;
+            gap: 8px 16px;
+            padding: 12px 24px;
             border-bottom: 1px solid var(--line);
-            background: rgba(8, 22, 58, 0.5);
         }
-        .banner-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+        .banner-main { display: flex; align-items: center; flex: 1; gap: 12px; min-width: 0; }
         .banner-text { min-width: 0; }
-        .banner-title { display: block; font-size: 14px; font-weight: 800; overflow-wrap: anywhere; }
-        .banner-sub { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+        .banner-title { display: block; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+        .banner-sub { display: block; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
         .banner .tags { flex: 1 1 100%; }
 
         #chat {
             flex: 1;
             min-height: 0;
             overflow-y: auto;
-            padding: 28px 16px 12px;
+            padding: 28px 24px 12px;
             scrollbar-width: thin;
-            scrollbar-color: rgba(56, 189, 248, 0.35) transparent;
+            scrollbar-color: var(--line-strong) transparent;
         }
-        #chat::-webkit-scrollbar { width: 8px; }
-        #chat::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.3); border-radius: 8px; }
 
-        #welcome {
-            max-width: 720px;
-            margin: 0 auto;
-            padding-top: 5vh;
+        #welcome { max-width: 640px; margin: 0 auto; padding-top: 7vh; }
+        #welcome h1 { margin: 0 0 6px; font-size: clamp(26px, 4vw, 34px); font-weight: 700; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+        #welcome p { margin: 0; color: var(--muted); }
+        .suggest { display: flex; flex-direction: column; margin-top: 28px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+        .suggest button {
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            animation: rise 0.7s ease both;
-        }
-        #welcome h1 {
-            margin: 26px 0 8px;
-            font-size: clamp(24px, 4.6vw, 34px);
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            overflow-wrap: anywhere;
-        }
-        #welcome p { margin: 0; color: var(--muted); font-size: 15px; }
-
-        .chips {
-            width: 100%;
-            margin-top: 36px;
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-        }
-        .chip {
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 16px;
+            border: 0;
+            border-bottom: 1px solid var(--line);
+            background: transparent;
             text-align: left;
-            padding: 15px 16px;
-            border-radius: 16px;
-            border: 1px solid var(--line);
-            background: rgba(20, 45, 105, 0.35);
-            color: var(--text);
-            font: inherit;
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s, transform 0.15s;
         }
-        .chip:hover {
-            background: rgba(37, 99, 235, 0.28);
-            border-color: rgba(56, 189, 248, 0.55);
-            transform: translateY(-1px);
-        }
-        .chip b { display: block; font-size: 14px; font-weight: 700; margin-bottom: 3px; }
-        .chip span { font-size: 12.5px; color: var(--muted); }
+        .suggest button:last-child { border-bottom: 0; }
+        .suggest button:hover { background: var(--surface); }
+        .suggest b { font-weight: 500; }
+        .suggest span { font-size: 13px; color: var(--faint); }
 
         #thread { max-width: 780px; margin: 0 auto; }
-
-        .msg { display: flex; gap: 14px; margin-bottom: 26px; animation: rise 0.25s ease both; }
+        .msg { display: flex; gap: 14px; margin-bottom: 26px; }
         .msg.user { justify-content: flex-end; }
 
         .bubble {
             max-width: 82%;
-            padding: 12px 17px;
-            border-radius: 20px 20px 6px 20px;
-            background: var(--grad);
+            padding: 11px 16px;
+            border-radius: 14px 14px 4px 14px;
+            background: #2a5fe0;
             color: #fff;
             font-size: 15px;
             line-height: 1.6;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
-            box-shadow: 0 10px 28px -12px rgba(37, 99, 235, 0.9);
         }
+        .bubble-images { display: flex; flex-wrap: wrap; gap: 8px; }
+        .bubble-images:not(:last-child) { margin-bottom: 8px; }
+        .bubble-img { display: block; max-width: 240px; max-height: 190px; border-radius: 8px; object-fit: cover; cursor: zoom-in; }
+        .bubble-img:not([src]) { display: none; }
+        .img-missing { padding: 8px 10px; border: 1px dashed rgba(255, 255, 255, 0.4); border-radius: 8px; font-size: 12.5px; white-space: normal; }
 
         .msg.assistant .body { flex: 1; min-width: 0; }
-        .who { display: flex; flex-direction: column; margin-bottom: 6px; }
-        .who-name { font-size: 13px; font-weight: 800; }
+        .who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 10px; margin-bottom: 6px; }
+        .who-name { font-size: 14px; font-weight: 700; }
         .who .model { margin-top: 0; }
 
-        .content {
-            font-size: 15.5px;
-            line-height: 1.7;
-            overflow-wrap: anywhere;
-        }
+        .content { font-size: 15.5px; line-height: 1.7; overflow-wrap: anywhere; }
         .content > :first-child { margin-top: 0; }
         .content > :last-child { margin-bottom: 0; }
         .content p { margin: 0 0 12px; }
-        .content h3, .content h4, .content h5, .content h6 { margin: 20px 0 8px; line-height: 1.3; }
+        .content h3, .content h4, .content h5, .content h6 { margin: 20px 0 8px; line-height: 1.3; font-weight: 700; }
         .content h3 { font-size: 19px; }
         .content h4 { font-size: 17px; }
         .content h5, .content h6 { font-size: 15.5px; }
         .content ul, .content ol { margin: 0 0 12px; padding-left: 24px; }
         .content li { margin: 4px 0; }
         .content li::marker { color: var(--sky); }
-        .content a { color: var(--sky-soft); text-underline-offset: 3px; }
-        .content hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+        .content a { color: var(--sky); text-underline-offset: 3px; }
+        .content hr { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
         .content code {
+            padding: 2px 6px;
+            border-radius: 5px;
+            background: var(--surface-2);
+            color: #b9dcff;
             font-family: var(--mono);
             font-size: 0.88em;
-            padding: 2px 6px;
-            border-radius: 6px;
-            background: rgba(56, 189, 248, 0.14);
-            color: var(--sky-soft);
         }
 
-        .code {
-            margin: 4px 0 14px;
-            border: 1px solid var(--line);
-            border-radius: 14px;
-            background: #04102e;
-            overflow: hidden;
-        }
-        .code-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 7px 8px 7px 14px;
-            background: rgba(37, 99, 235, 0.16);
-            border-bottom: 1px solid var(--line);
-            font-size: 12px;
-            color: var(--muted);
-        }
+        .code { margin: 4px 0 14px; border: 1px solid var(--line); border-radius: 10px; background: #060d1c; overflow: hidden; }
+        .code-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); }
         .code pre { margin: 0; padding: 14px; overflow-x: auto; }
-        .code pre code {
-            padding: 0;
-            background: none;
-            color: #d6e9ff;
-            font-size: 13px;
-            line-height: 1.6;
-        }
+        .code pre code { padding: 0; background: none; color: #d6e6ff; font-size: 13px; line-height: 1.6; }
 
         .mini-btn {
             padding: 4px 10px;
-            border-radius: 8px;
             border: 1px solid transparent;
+            border-radius: 6px;
             background: transparent;
             color: var(--muted);
-            font: 600 12px var(--font);
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
+            font-size: 12.5px;
+            font-weight: 500;
         }
-        .mini-btn:hover { background: rgba(56, 189, 248, 0.16); color: var(--text); }
-
-        .actions { margin-top: 6px; margin-left: -10px; min-height: 28px; }
+        .mini-btn:hover { background: var(--surface-2); color: var(--text); }
+        .actions { min-height: 28px; margin: 6px 0 0 -10px; }
 
         .note {
             display: flex;
@@ -829,121 +668,113 @@
             gap: 10px 14px;
             margin-top: 10px;
             padding: 10px 14px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 140, 140, 0.35);
-            background: rgba(255, 90, 90, 0.08);
-            color: #ffb4b4;
-            font-size: 13.5px;
+            border: 1px solid rgba(248, 113, 113, 0.45);
+            border-radius: 10px;
+            background: rgba(248, 113, 113, 0.07);
+            color: #fca5a5;
+            font-size: 14px;
             line-height: 1.5;
         }
+        .content > .note:first-child { margin-top: 0; }
         .note-text { flex: 1 1 260px; }
         .note-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-        .content > .note:first-child { margin-top: 0; }
-        .note .mini-btn { border-color: rgba(255, 140, 140, 0.4); color: #ffd0d0; padding: 6px 12px; }
-        .note .mini-btn:hover { background: rgba(255, 140, 140, 0.16); color: #fff; }
+        .note .mini-btn { border-color: rgba(248, 113, 113, 0.45); color: #fecaca; padding: 6px 12px; }
+        .note .mini-btn:hover { background: rgba(248, 113, 113, 0.16); color: #fff; }
 
         .typing { display: inline-flex; gap: 5px; padding: 10px 0; }
-        .typing i {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--grad);
-            animation: bounce 1.1s infinite ease-in-out;
-        }
+        .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: bounce 1.1s infinite ease-in-out; }
         .typing i:nth-child(2) { animation-delay: 0.15s; }
         .typing i:nth-child(3) { animation-delay: 0.3s; }
 
         /* ---------- Composer ---------- */
-        #input-area { padding: 8px 16px 16px; }
+        #input-area { flex: none; padding: 8px 24px 18px; }
         #form {
+            display: flex;
+            flex-direction: column;
             max-width: 780px;
             margin: 0 auto;
-            display: flex;
-            align-items: flex-end;
-            gap: 10px;
-            padding: 10px 10px 10px 18px;
-            border: 1px solid var(--line);
-            border-radius: 22px;
-            background: var(--panel);
-            -webkit-backdrop-filter: blur(14px);
-            backdrop-filter: blur(14px);
-            box-shadow: 0 20px 50px -24px rgba(37, 99, 235, 0.8);
-            transition: border-color 0.15s, box-shadow 0.15s;
+            border: 1px solid var(--line-strong);
+            border-radius: 14px;
+            background: var(--surface);
+            transition: border-color 0.12s;
         }
-        #form:focus-within {
-            border-color: rgba(56, 189, 248, 0.65);
-            box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12), 0 20px 50px -24px rgba(37, 99, 235, 0.8);
+        #form:focus-within { border-color: var(--sky); }
+        .attachments { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 12px 0; }
+        .att { position: relative; width: 64px; height: 64px; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; }
+        .att img { display: block; width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+        .att-remove {
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            display: grid;
+            place-items: center;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(4, 8, 18, 0.85);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1;
         }
-
+        .composer-row { display: flex; align-items: flex-end; gap: 8px; padding: 8px; }
+        .attach-wrap { display: inline-flex; flex: none; }
+        .attach-btn { border-color: transparent; color: var(--sky); }
+        .attach-btn:disabled { color: var(--faint); opacity: 0.45; filter: grayscale(1); pointer-events: none; }
+        .attach-wrap.off { cursor: not-allowed; }
         #message {
             flex: 1;
-            resize: none;
             max-height: 180px;
-            padding: 10px 0;
+            padding: 9px 4px;
             border: 0;
             outline: none;
             background: transparent;
-            color: var(--text);
-            font: 400 15.5px/1.5 var(--font);
+            font-size: 15.5px;
+            line-height: 1.5;
+            resize: none;
         }
-        #message::placeholder { color: #6f8ab8; }
-
+        #message::placeholder { color: var(--faint); }
         .send {
             display: grid;
             place-items: center;
             flex: none;
-            width: 42px;
-            height: 42px;
+            width: 38px;
+            height: 38px;
             border: 0;
-            border-radius: 14px;
+            border-radius: 9px;
             background: var(--grad);
             color: #fff;
-            cursor: pointer;
-            box-shadow: 0 10px 24px -10px rgba(56, 189, 248, 0.9);
-            transition: transform 0.15s, opacity 0.15s;
         }
-        .send:hover:not(:disabled) { transform: translateY(-1px); }
-        .send:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
-        .send svg { width: 20px; height: 20px; }
+        .send:hover:not(:disabled) { filter: brightness(1.08); }
+        .send:disabled { opacity: 0.35; cursor: not-allowed; }
+        .send svg { width: 19px; height: 19px; }
         .send .i-stop { display: none; }
-        .send.is-stop { background: linear-gradient(135deg, #1e3a8a, #1d4ed8); }
+        .send.is-stop { background: #1e3a8a; }
         .send.is-stop .i-stop { display: block; }
         .send.is-stop .i-send { display: none; }
+        .hint { max-width: 780px; margin: 8px auto 0; font-size: 12px; text-align: center; color: var(--faint); }
+        .hint.warn { color: var(--warn); }
 
-        .hint {
-            max-width: 780px;
-            margin: 8px auto 0;
-            text-align: center;
-            font-size: 11.5px;
-            color: #6f8ab8;
-        }
+        .lightbox { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(4, 8, 18, 0.88); cursor: zoom-out; }
+        .lightbox img { max-width: 92vw; max-height: 88vh; border-radius: 8px; }
 
-        /* ---------- Motion ---------- */
-        @keyframes rise {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: none; }
-        }
-        @keyframes bounce {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-            40% { transform: translateY(-5px); opacity: 1; }
-        }
+        @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.5; } 40% { transform: translateY(-4px); opacity: 1; } }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes shimmer { to { background-position: -220% 0; } }
+        @keyframes shimmer { to { background-position: -200% 0; } }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation: none !important; transition: none !important; }
         }
 
-        /* ---------- Small screens: sidebar becomes a drawer ---------- */
+        /* ---------- Small screens ---------- */
         @media (max-width: 820px) {
-            header { padding: 10px 14px; }
-            .brand-wrap { gap: 8px; }
+            .topbar { padding: 0 14px; }
+            .menu-btn { display: inline-grid; }
             .brand { gap: 9px; }
-            header .avatar { width: 34px; height: 34px; border-radius: 11px; }
-            header .avatar svg { width: 20px; height: 20px; }
-            .brand-name { font-size: 13.5px; }
-            .icon-btn { display: grid; }
-            .ghost-btn.label-hide span { display: none; }
-            .ghost-btn.label-hide { padding: 9px 10px; }
+            .topbar .mark-tile { width: 32px; height: 32px; }
+            .brand-name { font-size: 16px; }
+            .btn.label-hide span { display: none; }
+            .btn.label-hide { padding: 0 10px; }
 
             .sidebar {
                 position: fixed;
@@ -952,23 +783,17 @@
                 bottom: 0;
                 left: 0;
                 width: min(86vw, 310px);
-                background: #061638;
-                box-shadow: 20px 0 60px -20px rgba(0, 0, 0, 0.6);
+                background: var(--bg-side);
                 transform: translateX(-102%);
                 visibility: hidden;
-                transition: transform 0.22s ease, visibility 0s linear 0.22s;
+                transition: transform 0.2s ease, visibility 0s linear 0.2s;
             }
-            .sidebar.open {
-                transform: none;
-                visibility: visible;
-                transition: transform 0.22s ease, visibility 0s;
-            }
+            .sidebar.open { transform: none; visibility: visible; transition: transform 0.2s ease, visibility 0s; }
 
-            #view-dashboard { padding: 22px 16px 40px; }
-            .random-card { flex-direction: column; align-items: flex-start; }
-            .random-btn { width: 100%; }
-            .banner { padding: 10px 14px; }
-            .chips { grid-template-columns: 1fr; }
+            #view-dashboard { padding: 0 16px 44px; }
+            .banner { padding: 12px 16px; }
+            #chat { padding: 22px 16px 12px; }
+            #input-area { padding: 8px 12px 14px; }
             .bubble { max-width: 90%; }
             .msg { gap: 10px; }
             #welcome { padding-top: 3vh; }
@@ -981,34 +806,32 @@
 <!-- Shared icons -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
     <defs>
-        <linearGradient id="g-spark" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#1e40ff"/>
-            <stop offset="1" stop-color="#38bdf8"/>
-        </linearGradient>
-        <symbol id="icon-bot" viewBox="0 0 32 32">
-            <path d="M16 4C9.4 4 4 8.9 4 15c0 3.2 1.5 6 3.9 8L7 28l5.2-2.6c1.2.4 2.5.6 3.8.6 6.6 0 12-4.9 12-11S22.6 4 16 4z" fill="#ffffff"/>
-            <path d="M16 9l1.7 4.3L22 15l-4.3 1.7L16 21l-1.7-4.3L10 15l4.3-1.7z" fill="url(#g-spark)"/>
+        <!-- Afterworld mark: a sun on the horizon, with its reflection -->
+        <symbol id="mark" viewBox="0 0 32 32">
+            <path d="M7 19.5a9 9 0 0 1 18 0z" fill="#ffffff"/>
+            <path d="M5 23.5h22" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" opacity="0.8"/>
+            <path d="M9 27.5h14" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" opacity="0.45"/>
         </symbol>
     </defs>
 </svg>
 
-<header>
-    <div class="brand-wrap">
-        <button class="icon-btn" id="menu-btn" type="button" aria-label="Open chat list" aria-controls="sidebar" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+<header class="topbar">
+    <div class="topbar-left">
+        <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-label="Open chat list" aria-controls="sidebar" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
 
-        <div class="brand">
-            <div class="avatar" aria-hidden="true"><svg><use href="#icon-bot"/></svg></div>
-            <div class="brand-text">
-                <div class="brand-name">Afterworld 1.1.0</div>
-                <div class="model" id="model-label">Choose a model</div>
-            </div>
-        </div>
+        <button class="brand" id="brand-link" type="button" aria-label="Afterworld home">
+            <span class="mark-tile" aria-hidden="true"><svg><use href="#mark"/></svg></span>
+            <span class="brand-text">
+                <span class="brand-name">Afterworld</span>
+                <span class="model" id="model-label">Choose a model</span>
+            </span>
+        </button>
     </div>
 
-    <button class="ghost-btn label-hide" id="dash-btn" type="button" aria-label="Open the model dashboard">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+    <button class="btn label-hide" id="dash-btn" type="button" aria-label="Open the model dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>
         <span>Models</span>
     </button>
 </header>
@@ -1017,8 +840,8 @@
 
     <aside class="sidebar" id="sidebar" aria-label="Chat history">
         <div class="side-top">
-            <button class="new-btn" id="new-chat" type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <button class="btn btn-primary" id="new-chat" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 New chat
             </button>
         </div>
@@ -1037,51 +860,91 @@
 
     <div class="workspace">
 
-        <!-- ================= Model dashboard ================= -->
-        <section class="view" id="view-dashboard" aria-label="Model dashboard">
+        <!-- ================= Front page: model dashboard ================= -->
+        <section class="view" id="view-dashboard" aria-label="Models">
             <div class="dash">
 
-                <div class="hero">
-                    <p class="eyebrow"><i></i>Free models, loaded live from OpenRouter</p>
-                    <h1>Choose a model to start chatting</h1>
-                    <p class="lede">Each chat stays with the model you pick. Start a new chat from here any time to try a different one.</p>
-                </div>
+                <section class="hero">
+                    <div class="hero-main">
+                        <p class="hero-kicker">Version 1.0.4</p>
+                        <h1 class="wordmark">
+                            <svg class="wm-mark" aria-hidden="true"><use href="#mark"/></svg>
+                            <span>Afterworld</span>
+                        </h1>
+                        <p class="hero-lede">Free AI models, all in one place.</p>
+                        <p class="hero-sub">Pick a model to start a chat, or let Afterworld choose one of the fastest models that is answering right now.</p>
 
-                <div class="random-card">
-                    <div class="random-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="#ffffff"><path d="M13.2 2.5 4.6 13.4c-.4.5 0 1.2.6 1.2h5.1l-1 6.3c-.1.8.9 1.2 1.4.6l8.6-10.9c.4-.5 0-1.2-.6-1.2h-5.1l1-6.3c.1-.8-.9-1.2-1.4-.6z"/></svg>
+                        <div class="hero-actions">
+                            <button class="btn btn-primary btn-lg" id="random-btn" type="button">
+                                <span class="spinner" aria-hidden="true"></span>
+                                <svg class="bolt" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.2 2.5 4.6 13.4c-.4.5 0 1.2.6 1.2h5.1l-1 6.3c-.1.8.9 1.2 1.4.6l8.6-10.9c.4-.5 0-1.2-.6-1.2h-5.1l1-6.3c.1-.8-.9-1.2-1.4-.6z"/></svg>
+                                <span id="random-label">Random fast model</span>
+                            </button>
+                            <button class="btn-link" id="jump-models" type="button">
+                                Browse all models
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+                            </button>
+                        </div>
+                        <p class="hero-note" id="random-hint">Picks at random from the 3 fastest free models, then keeps it for the whole chat.</p>
                     </div>
-                    <div class="random-text">
-                        <h2>Random fast model</h2>
-                        <p id="random-hint">Picks a random free model from the fastest ones that are answering right now, then keeps it for the whole chat.</p>
-                    </div>
-                    <button class="random-btn" id="random-btn" type="button">
-                        <span class="spinner" aria-hidden="true"></span>
-                        <svg class="bolt" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.2 2.5 4.6 13.4c-.4.5 0 1.2.6 1.2h5.1l-1 6.3c-.1.8.9 1.2 1.4.6l8.6-10.9c.4-.5 0-1.2-.6-1.2h-5.1l1-6.3c.1-.8-.9-1.2-1.4-.6z"/></svg>
-                        <span id="random-label">Pick one for me</span>
-                    </button>
-                </div>
 
-                <div class="controls">
+                    <aside class="live" aria-label="Live status">
+                        <div class="live-head">
+                            <span class="live-dot" id="live-dot"></span>
+                            <h2>Live status</h2>
+                            <span class="live-stamp" id="live-stamp">Loading…</span>
+                        </div>
+                        <dl class="live-list">
+                            <div>
+                                <dt>Fastest right now</dt>
+                                <dd id="live-fastest">…</dd>
+                            </div>
+                            <div>
+                                <dt>Requests this minute</dt>
+                                <dd><b id="live-min">…</b> <span class="muted" id="live-min-of">of 20</span>
+                                    <div class="meter"><i id="live-min-bar"></i></div></dd>
+                            </div>
+                            <div>
+                                <dt>Requests today (UTC)</dt>
+                                <dd><b id="live-day">…</b> <span class="muted" id="live-day-of">of 50, or 1,000 after buying $10+ of credits</span></dd>
+                            </div>
+                        </dl>
+                        <p class="live-foot">One limit covers every free model, because it applies to your OpenRouter account and not to each model. Counts include only requests sent through Afterworld.</p>
+                    </aside>
+                </section>
+
+                <div class="toolbar" id="models">
                     <label class="search">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                         <input id="search" type="search" placeholder="Search by name, provider or description" aria-label="Search models" autocomplete="off">
                     </label>
 
-                    <div class="seg" id="group-seg" role="group" aria-label="Group models by">
-                        <button type="button" data-group="context">Context window</button>
-                        <button type="button" data-group="size">Size</button>
-                        <button type="button" data-group="quality">Benchmark</button>
-                        <button type="button" data-group="input">Input</button>
-                        <button type="button" data-group="provider">Provider</button>
+                    <div class="field">
+                        <span class="field-label" id="group-label">Group by</span>
+                        <div class="seg" id="group-seg" role="group" aria-labelledby="group-label">
+                            <button type="button" data-group="context">Context window</button>
+                            <button type="button" data-group="size">Size</button>
+                            <button type="button" data-group="quality">Benchmark</button>
+                            <button type="button" data-group="input">Input</button>
+                            <button type="button" data-group="provider">Provider</button>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="sort">Sort within groups</label>
+                        <select id="sort">
+                            <option value="context">Largest context first</option>
+                            <option value="latency">Fastest first</option>
+                            <option value="name">Name, A to Z</option>
+                        </select>
                     </div>
                 </div>
 
                 <div class="filters" id="filters" role="group" aria-label="Filter by ability">
                     <span class="filter-label">Only show</span>
-                    <button class="filter-chip" type="button" data-filter="reasoning" aria-pressed="false">Reasoning</button>
-                    <button class="filter-chip" type="button" data-filter="tools" aria-pressed="false">Tool calling</button>
-                    <button class="filter-chip" type="button" data-filter="vision" aria-pressed="false">Image input</button>
+                    <button class="toggle" type="button" data-filter="reasoning" aria-pressed="false">Reasoning</button>
+                    <button class="toggle" type="button" data-filter="tools" aria-pressed="false">Tool calling</button>
+                    <button class="toggle" type="button" data-filter="vision" aria-pressed="false">Image input</button>
                 </div>
 
                 <div class="meta" id="dash-meta"></div>
@@ -1089,9 +952,9 @@
                 <div id="dash-body"></div>
 
                 <p class="fine">
-                    Free models are rate limited by OpenRouter and their providers, and some providers may log or train on prompts, so avoid sharing sensitive information.
-                    Model data, context windows, output limits, abilities and benchmark scores come from the OpenRouter API (benchmarks by Artificial Analysis).
-                    OpenRouter does not publish parameter counts, so sizes are shown only when the model itself states them.
+                    Free models are rate limited by OpenRouter and by their providers, and some providers may log or train on prompts, so avoid sharing sensitive information.
+                    Context windows, output limits, abilities and benchmark scores come from the OpenRouter API (benchmarks by Artificial Analysis).
+                    Latency is OpenRouter's 30-minute median where it is available, or a speed measured by Afterworld. OpenRouter does not publish parameter counts, so sizes appear only when a model states them.
                 </p>
             </div>
         </section>
@@ -1104,22 +967,21 @@
             <main id="chat" role="log" aria-live="polite" aria-label="Conversation">
 
                 <section id="welcome">
-                    <div class="avatar lg" aria-hidden="true"><svg><use href="#icon-bot"/></svg></div>
-                    <h1 id="welcome-title">How can I help today?</h1>
-                    <p id="welcome-sub">Ask a question, paste some code, or pick a starting point.</p>
+                    <h1 id="welcome-title">New chat</h1>
+                    <p id="welcome-sub">Ask anything to get started.</p>
 
-                    <div class="chips">
-                        <button class="chip" type="button" data-prompt="Explain how a transformer neural network works, step by step.">
-                            <b>Explain a concept</b><span>Break a topic down step by step</span>
+                    <div class="suggest">
+                        <button type="button" data-prompt="Explain how a transformer neural network works, step by step.">
+                            <b>Explain a concept</b><span>How a transformer works, step by step</span>
                         </button>
-                        <button class="chip" type="button" data-prompt="Help me debug my code. I'll paste the error message next.">
-                            <b>Debug my code</b><span>Paste an error and get a fix</span>
+                        <button type="button" data-prompt="Help me debug my code. I'll paste the error message next.">
+                            <b>Debug some code</b><span>Paste an error and get a fix</span>
                         </button>
-                        <button class="chip" type="button" data-prompt="Draft a polite email asking my professor for a deadline extension.">
-                            <b>Write an email</b><span>Draft something clear and polite</span>
+                        <button type="button" data-prompt="Draft a polite email asking my professor for a deadline extension.">
+                            <b>Draft an email</b><span>A polite request for an extension</span>
                         </button>
-                        <button class="chip" type="button" data-prompt="Help me plan a study schedule for this week.">
-                            <b>Plan my week</b><span>Turn goals into a study schedule</span>
+                        <button type="button" data-prompt="Help me plan a study schedule for this week.">
+                            <b>Plan a study week</b><span>Turn goals into a schedule</span>
                         </button>
                     </div>
                 </section>
@@ -1129,38 +991,60 @@
 
             <div id="input-area">
                 <form id="form" autocomplete="off">
-                    <textarea id="message" rows="1" placeholder="Message Afterworld" aria-label="Message"></textarea>
+                    <div class="attachments" id="attachments" hidden></div>
 
-                    <button class="send" id="send" type="submit" aria-label="Send message" disabled>
-                        <svg class="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-                        <svg class="i-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
-                    </button>
+                    <div class="composer-row">
+                        <span class="attach-wrap" id="attach-wrap" title="This model doesn't accept images">
+                            <button class="icon-btn attach-btn" id="attach-btn" type="button" aria-label="Attach an image (this model doesn't accept images)" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l4.5-4.5 3.5 3.5 3-3 5 5"/></svg>
+                            </button>
+                        </span>
+
+                        <textarea id="message" rows="1" placeholder="Message Afterworld" aria-label="Message"></textarea>
+
+                        <button class="send" id="send" type="submit" aria-label="Send message" disabled>
+                            <svg class="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                            <svg class="i-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>
+                        </button>
+                    </div>
+
+                    <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
                 </form>
-                <div class="hint">Press Enter to send, Shift+Enter for a new line</div>
+                <div class="hint" id="hint">Enter to send, Shift+Enter for a new line</div>
             </div>
         </section>
 
     </div>
 </div>
 
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" hidden>
+    <img alt="">
+</div>
+
 <script>
-const APP_NAME = "Afterworld 1.1.0";
+const APP_NAME = "Afterworld";
 const NETWORK_ERROR = "Couldn't reach the server. Check that main.py is running, then try again.";
-const STORE_CHATS = "crchatbot.chats.v2";
-const STORE_ACTIVE = "crchatbot.active.v2";
-const STORE_GROUP = "crchatbot.groupby.v1";
+const KEYS = { chats: "afterworld.chats.v1", active: "afterworld.active.v1", group: "afterworld.groupby.v1", sort: "afterworld.sort.v1" };
+const LEGACY_KEYS = { chats: "crchatbot.chats.v2", active: "crchatbot.active.v2", group: "crchatbot.groupby.v1" };
 const MAX_CHATS = 100;
-const TRASH_ICON =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
-const ARROW_ICON =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
 const GROUP_KEYS = ["context", "size", "quality", "input", "provider"];
+const SORT_KEYS = ["context", "latency", "name"];
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const MAX_IMAGES_PER_MESSAGE = 4;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_CONTEXT_IMAGES = 6;
+const LIVE_REFRESH_MS = 60000;
+const DEFAULT_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000 };
 const SIZE_SOURCES = {
     id: "Stated in the model's id",
     weights: "Stated in the model's Hugging Face repository name",
     description: "Stated in the model's OpenRouter description"
 };
+const TRASH_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+const CHEVRON_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 
 const form = document.getElementById("form");
 const input = document.getElementById("message");
@@ -1174,6 +1058,7 @@ const sidebar = document.getElementById("sidebar");
 const scrim = document.getElementById("scrim");
 const menuButton = document.getElementById("menu-btn");
 const dashButton = document.getElementById("dash-btn");
+const brandLink = document.getElementById("brand-link");
 const chatList = document.getElementById("chat-list");
 const chatEmpty = document.getElementById("chat-empty");
 const modelLabel = document.getElementById("model-label");
@@ -1184,11 +1069,28 @@ const dashBody = document.getElementById("dash-body");
 const dashMeta = document.getElementById("dash-meta");
 const searchInput = document.getElementById("search");
 const groupSeg = document.getElementById("group-seg");
+const sortSelect = document.getElementById("sort");
 const filtersBox = document.getElementById("filters");
 const randomButton = document.getElementById("random-btn");
 const randomLabel = document.getElementById("random-label");
 const randomHint = document.getElementById("random-hint");
 const RANDOM_HINT = randomHint.textContent;
+const liveDot = document.getElementById("live-dot");
+const liveStamp = document.getElementById("live-stamp");
+const liveFastest = document.getElementById("live-fastest");
+const liveMin = document.getElementById("live-min");
+const liveMinOf = document.getElementById("live-min-of");
+const liveMinBar = document.getElementById("live-min-bar");
+const liveDay = document.getElementById("live-day");
+const liveDayOf = document.getElementById("live-day-of");
+const attachButton = document.getElementById("attach-btn");
+const attachWrap = document.getElementById("attach-wrap");
+const fileInput = document.getElementById("file-input");
+const attachmentsBox = document.getElementById("attachments");
+const hintBox = document.getElementById("hint");
+const HINT_DEFAULT = hintBox.textContent;
+const lightbox = document.getElementById("lightbox");
+const lightboxImg = lightbox.querySelector("img");
 
 class ApiError extends Error {}
 
@@ -1200,8 +1102,42 @@ let catalog = null;            // the last /api/models response
 let catalogState = "idle";     // idle | loading | ready | error
 let catalogError = "";
 let randomBusy = false;
+let pending = [];              // images waiting to be sent with the next message
+let attachEpoch = 0;
+let hintTimer = 0;
 
-const dash = { group: loadGroup(), query: "", filters: new Set() };
+const live = { state: "idle", loading: false, models: {}, usage: null, limits: null, updatedAt: 0 };
+const testing = new Set();
+const testNotes = new Map();
+
+/* ==========================================================
+   Storage helpers
+   ========================================================== */
+
+function readStore(name) {
+    try {
+        let value = localStorage.getItem(KEYS[name]);
+        if (value === null && LEGACY_KEYS[name]) value = localStorage.getItem(LEGACY_KEYS[name]);
+        return value;
+    } catch (error) {
+        return null;
+    }
+}
+
+function writeStore(name, value) {
+    try {
+        localStorage.setItem(KEYS[name], value);
+    } catch (error) {
+        console.warn("Could not save " + name + ":", error);
+    }
+}
+
+const dash = {
+    group: (() => { const saved = readStore("group"); return GROUP_KEYS.includes(saved) ? saved : "context"; })(),
+    sort: (() => { const saved = readStore("sort"); return SORT_KEYS.includes(saved) ? saved : "context"; })(),
+    query: "",
+    filters: new Set()
+};
 
 /* ==========================================================
    Small helpers
@@ -1217,15 +1153,22 @@ function el(tag, className, text) {
 function hashHue(text) {
     let h = 0;
     for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return 195 + (h % 50);
+    return 200 + (h % 40);
 }
 
 function providerTile(provider, small) {
     const name = (provider || "?").trim() || "?";
     const tile = el("span", "tile" + (small ? " sm" : ""), name.charAt(0).toUpperCase());
     const hue = hashHue(name);
-    tile.style.background = "linear-gradient(135deg, hsl(" + hue + " 90% 42%), hsl(" + (hue + 18) + " 95% 58%))";
+    tile.style.background = "linear-gradient(135deg, hsl(" + hue + " 70% 38%), hsl(" + (hue + 14) + " 75% 48%))";
     tile.setAttribute("aria-hidden", "true");
+    return tile;
+}
+
+function markTile(small) {
+    const tile = el("span", "mark-tile" + (small ? " sm" : ""));
+    tile.setAttribute("aria-hidden", "true");
+    tile.innerHTML = '<svg><use href="#mark"/></svg>';
     return tile;
 }
 
@@ -1234,19 +1177,21 @@ function fmtBillions(value) {
     return parseFloat(value.toFixed(3)) + "B";
 }
 
-function fmtDate(iso) {
-    if (!iso) return "";
-    const date = new Date(iso + "T00:00:00Z");
-    if (isNaN(date.getTime())) return iso;
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+function fmtMs(ms) {
+    if (ms < 1000) return Math.round(ms) + " ms";
+    return (ms / 1000).toFixed(1) + " s";
 }
 
-function timeAgo(iso) {
-    const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-    if (isNaN(seconds) || seconds < 45) return "just now";
+function ago(seconds) {
+    if (seconds === null || seconds === undefined || seconds < 45) return "just now";
     if (seconds < 3600) return Math.round(seconds / 60) + " min ago";
     if (seconds < 86400) return Math.round(seconds / 3600) + " h ago";
     return Math.round(seconds / 86400) + " d ago";
+}
+
+function timeAgo(iso) {
+    const seconds = (Date.now() - new Date(iso).getTime()) / 1000;
+    return ago(isNaN(seconds) ? 0 : Math.max(0, seconds));
 }
 
 function snapshot(m) {
@@ -1270,6 +1215,137 @@ function abilityTags(m) {
     if (m.audio) tags.push("Audio");
     if (m.video) tags.push("Video");
     return tags;
+}
+
+function fmtDate(iso) {
+    if (!iso) return "";
+    const date = new Date(iso + "T00:00:00Z");
+    if (isNaN(date.getTime())) return iso;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/* ==========================================================
+   Images: storage (IndexedDB, so history never fills localStorage) and preparation
+   ========================================================== */
+
+const imageStore = (() => {
+    const memory = new Map();
+    let dbPromise = null;
+
+    function openDb() {
+        if (dbPromise) return dbPromise;
+        dbPromise = new Promise((resolve) => {
+            try {
+                const request = indexedDB.open("afterworld", 1);
+                request.onupgradeneeded = () => request.result.createObjectStore("images", { keyPath: "id" });
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => resolve(null);
+                request.onblocked = () => resolve(null);
+            } catch (error) {
+                resolve(null);
+            }
+        });
+        return dbPromise;
+    }
+
+    function run(mode, work) {
+        return openDb().then((db) => {
+            if (!db) return undefined;
+            return new Promise((resolve) => {
+                try {
+                    const tx = db.transaction("images", mode);
+                    const request = work(tx.objectStore("images"));
+                    tx.oncomplete = () => resolve(request ? request.result : undefined);
+                    tx.onerror = () => resolve(undefined);
+                    tx.onabort = () => resolve(undefined);
+                } catch (error) {
+                    resolve(undefined);
+                }
+            });
+        });
+    }
+
+    return {
+        async put(id, dataUrl) {
+            memory.set(id, dataUrl);
+            await run("readwrite", (store) => store.put({ id: id, dataUrl: dataUrl }));
+        },
+        async get(id) {
+            if (memory.has(id)) return memory.get(id);
+            const record = await run("readonly", (store) => store.get(id));
+            return record ? record.dataUrl : null;
+        },
+        async remove(ids) {
+            if (!ids.length) return;
+            ids.forEach((id) => memory.delete(id));
+            await run("readwrite", (store) => { ids.forEach((id) => store.delete(id)); });
+        }
+    };
+})();
+
+function loadWithImageElement(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("decode failed")); };
+        image.src = url;
+    });
+}
+
+function loadBitmap(file) {
+    if (window.createImageBitmap) {
+        return createImageBitmap(file).catch(() => loadWithImageElement(file));
+    }
+    return loadWithImageElement(file);
+}
+
+// Shrinks the image and turns it into a JPEG so requests stay small
+async function prepareImage(file) {
+    const label = file.name || "That image";
+
+    if (!IMAGE_TYPES.includes(file.type)) throw new Error(label + " isn't a PNG, JPEG, WebP or GIF image.");
+    if (file.size > MAX_IMAGE_BYTES) throw new Error(label + " is larger than 20 MB.");
+
+    let source;
+    try {
+        source = await loadBitmap(file);
+    } catch (error) {
+        throw new Error("Couldn't read " + label + ".");
+    }
+
+    const width = source.width;
+    const height = source.height;
+    if (!width || !height) throw new Error("Couldn't read " + label + ".");
+
+    let dataUrl = "";
+    for (const side of [1600, 1100, 720]) {
+        const scale = Math.min(1, side / Math.max(width, height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+        dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+        if (dataUrl.length <= 2500000) break;
+    }
+
+    if (source.close) source.close();
+    return { id: uid(), name: file.name || "image", dataUrl: dataUrl };
+}
+
+function removeChatImages(convo) {
+    const ids = [];
+    convo.messages.forEach((m) => (m.images || []).forEach((image) => ids.push(image.id)));
+    return imageStore.remove(ids);
 }
 
 /* ==========================================================
@@ -1398,7 +1474,7 @@ function renderMarkdown(source) {
 
 function loadChats() {
     try {
-        const parsed = JSON.parse(localStorage.getItem(STORE_CHATS) || "[]");
+        const parsed = JSON.parse(readStore("chats") || "[]");
         if (!Array.isArray(parsed)) return [];
 
         return parsed
@@ -1425,7 +1501,12 @@ function loadChats() {
                         role: m.role,
                         content: m.content,
                         model: typeof m.model === "string" ? m.model : null,
-                        error: m.error === true
+                        error: m.error === true,
+                        images: Array.isArray(m.images)
+                            ? m.images
+                                .filter((i) => i && typeof i.id === "string")
+                                .map((i) => ({ id: i.id, name: String(i.name || "image") }))
+                            : []
                     }))
             }));
     } catch (error) {
@@ -1434,41 +1515,16 @@ function loadChats() {
     }
 }
 
-function loadActiveId() {
-    try {
-        return localStorage.getItem(STORE_ACTIVE) || null;
-    } catch (error) {
-        return null;
-    }
-}
-
-function loadGroup() {
-    try {
-        const saved = localStorage.getItem(STORE_GROUP);
-        return GROUP_KEYS.includes(saved) ? saved : "context";
-    } catch (error) {
-        return "context";
-    }
-}
-
 let chats = loadChats();
-let activeId = loadActiveId();
+let activeId = readStore("active") || null;
 if (!chats.some((c) => c.id === activeId)) activeId = null;
 
 function saveChats() {
-    try {
-        localStorage.setItem(STORE_CHATS, JSON.stringify(chats));
-    } catch (error) {
-        console.warn("Could not save chats:", error);
-    }
+    writeStore("chats", JSON.stringify(chats));
 }
 
 function saveActive() {
-    try {
-        localStorage.setItem(STORE_ACTIVE, activeId || "");
-    } catch (error) {
-        console.warn("Could not save the active chat:", error);
-    }
+    writeStore("active", activeId || "");
 }
 
 function sortedChats() {
@@ -1491,13 +1547,9 @@ function currentOrigin() {
     return draft ? { origin: draft.origin, note: draft.note } : { origin: "picked", note: "" };
 }
 
-function uid() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
 function makeTitle(text) {
     const clean = text.replace(/\s+/g, " ").trim();
-    if (!clean) return "New chat";
+    if (!clean) return "Image chat";
     return clean.length > 42 ? clean.slice(0, 42).trimEnd() + "…" : clean;
 }
 
@@ -1507,13 +1559,14 @@ function renderSidebar() {
     chatEmpty.hidden = list.length > 0;
 
     for (const c of list) {
-        const row = el("li", "chat-row" + (c.id === activeId && view === "chat" ? " active" : ""));
+        const isActive = c.id === activeId && view === "chat";
+        const row = el("li", "chat-row" + (isActive ? " active" : ""));
 
         const open = el("button", "chat-item");
         open.type = "button";
         open.dataset.id = c.id;
         open.title = c.title + " (" + c.model.id + ")";
-        if (c.id === activeId && view === "chat") open.setAttribute("aria-current", "true");
+        if (isActive) open.setAttribute("aria-current", "true");
         open.appendChild(el("span", "chat-title", c.title));
         open.appendChild(el("span", "chat-model", c.model.name));
 
@@ -1541,7 +1594,7 @@ chatList.addEventListener("click", (event) => {
 });
 
 /* ==========================================================
-   Drawer (mobile sidebar)
+   Drawer (mobile sidebar), lightbox
    ========================================================== */
 
 function openDrawer() {
@@ -1556,17 +1609,31 @@ function closeDrawer() {
     menuButton.setAttribute("aria-expanded", "false");
 }
 
+function openLightbox(src) {
+    lightboxImg.src = src;
+    lightbox.hidden = false;
+}
+
+function closeLightbox() {
+    lightbox.hidden = true;
+    lightboxImg.removeAttribute("src");
+}
+
 menuButton.addEventListener("click", openDrawer);
 scrim.addEventListener("click", closeDrawer);
+lightbox.addEventListener("click", closeLightbox);
 document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeDrawer();
+    if (event.key === "Escape") {
+        closeDrawer();
+        closeLightbox();
+    }
 });
 window.matchMedia("(min-width: 821px)").addEventListener("change", (event) => {
     if (event.matches) closeDrawer();
 });
 
 /* ==========================================================
-   Views and header
+   Views, header and banner
    ========================================================== */
 
 function updateHeader() {
@@ -1621,25 +1688,45 @@ function renderBanner() {
     main.appendChild(text);
     banner.appendChild(main);
 
-    const change = el("button", "ghost-btn");
+    const change = el("button", "btn", "Change model");
     change.type = "button";
-    change.textContent = "Change model";
     change.addEventListener("click", openDashboard);
     banner.appendChild(change);
 
     const tags = el("div", "tags");
-    if (meta.origin === "random") tags.appendChild(el("span", "tag random", "Random pick"));
+    if (meta.origin === "random") tags.appendChild(el("span", "tag accent", "Random pick"));
     abilityTags(model).forEach((label) => tags.appendChild(el("span", "tag", label)));
     if (tags.childNodes.length) banner.appendChild(tags);
+}
+
+function modelAcceptsImages() {
+    const model = currentModel();
+    return !!(model && model.vision);
+}
+
+function updateAttachState() {
+    const allowed = view === "chat" && modelAcceptsImages();
+
+    attachButton.disabled = !allowed;
+    attachWrap.classList.toggle("off", !allowed);
+    attachWrap.title = allowed
+        ? "Attach images (up to " + MAX_IMAGES_PER_MESSAGE + ")"
+        : "This model doesn't accept images";
+    attachButton.setAttribute("aria-label", allowed
+        ? "Attach an image"
+        : "Attach an image (this model doesn't accept images)");
+
+    if (!allowed && pending.length) clearPending();
 }
 
 function setComposerModel() {
     const model = currentModel();
     input.placeholder = model ? "Message " + model.name : "Message Afterworld";
+    updateAttachState();
 }
 
 /* ==========================================================
-   Dashboard
+   Dashboard: catalog
    ========================================================== */
 
 async function loadCatalog(force) {
@@ -1659,6 +1746,7 @@ async function loadCatalog(force) {
     }
 
     renderDashboard();
+    if (catalogState === "ready") loadLive();
 }
 
 function filteredModels() {
@@ -1673,47 +1761,188 @@ function filteredModels() {
     });
 }
 
-function modelCard(m, index) {
-    const card = el("button", "model-card");
-    card.type = "button";
-    card.dataset.id = m.id;
-    card.style.animationDelay = Math.min(index, 12) * 25 + "ms";
-    card.setAttribute("aria-label", "Start a chat with " + m.name);
+function latencyOf(model) {
+    const info = live.models[model.id];
+    return info && info.latency_ms !== null && info.latency_ms !== undefined ? info.latency_ms : null;
+}
 
-    const top = el("span", "mc-top");
-    top.appendChild(providerTile(m.provider));
-    const names = el("span", "mc-names");
-    names.appendChild(el("span", "mc-name", m.name));
-    names.appendChild(el("span", "mc-provider", m.provider));
-    top.appendChild(names);
-    card.appendChild(top);
+function sortItems(items) {
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const byContext = (a, b) => (b.context - a.context) || byName(a, b);
 
-    if (m.description) card.appendChild(el("span", "mc-desc", m.description));
+    if (dash.sort === "name") return items.sort(byName);
 
-    const stats = el("span", "mc-stats");
-    const addStat = (value, label, title) => {
-        const stat = el("span", "mc-stat");
-        stat.appendChild(el("b", "", value));
-        stat.appendChild(el("span", "", label));
-        if (title) stat.title = title;
-        stats.appendChild(stat);
-    };
-    addStat(m.context_label || "—", "Context", (m.context || 0).toLocaleString("en-US") + " tokens");
-    addStat(m.max_output_label || "—", "Max output", m.max_output ? m.max_output.toLocaleString("en-US") + " tokens per reply" : "Not stated");
-    if (m.params_total_b) {
-        addStat(fmtBillions(m.params_total_b),
-                m.params_active_b ? fmtBillions(m.params_active_b) + " active" : "Size",
-                SIZE_SOURCES[m.params_source] || "");
-    } else {
-        addStat("—", "Size not stated", "OpenRouter does not publish parameter counts, and this model does not state one");
+    if (dash.sort === "latency") {
+        return items.sort((a, b) => {
+            const la = latencyOf(a);
+            const lb = latencyOf(b);
+            if (la === null && lb === null) return byContext(a, b);
+            if (la === null) return 1;
+            if (lb === null) return -1;
+            return la - lb;
+        });
     }
-    card.appendChild(stats);
+    return items.sort(byContext);
+}
 
-    const tags = el("span", "tags");
+function visibleGroups() {
+    const models = filteredModels();
+    const config = catalog.groupings[dash.group];
+
+    return config.groups
+        .map((group) => ({
+            group: group,
+            items: sortItems(models.filter((m) => m.tiers[dash.group] === group.key))
+        }))
+        .filter((entry) => entry.items.length);
+}
+
+/* ==========================================================
+   Dashboard: rows and live cells
+   ========================================================== */
+
+function fillLatency(cell, id) {
+    if (!cell) return;
+    cell.textContent = "";
+
+    const info = live.models[id];
+    const line = el("span", "lat-line");
+    let caption = "";
+    let captionTitle = "";
+
+    if (testing.has(id)) {
+        line.appendChild(el("span", "v muted", "Testing…"));
+    } else {
+        if (info && info.latency_ms !== null && info.latency_ms !== undefined) {
+            const value = el("span", "v", fmtMs(info.latency_ms));
+            value.title = Math.round(info.latency_ms) + " ms to first output";
+            line.appendChild(value);
+            caption = info.latency_source === "measured"
+                ? "Measured " + ago(info.latency_age_s)
+                : "OpenRouter median";
+            captionTitle = info.latency_source === "measured"
+                ? "Time to first output, measured by Afterworld"
+                : "OpenRouter's median time to first output over the last 30 minutes";
+        } else if (live.state === "ready" || live.state === "error") {
+            line.appendChild(el("span", "v muted", "—"));
+            caption = live.state === "error" ? "Live data unavailable" : "No data yet";
+        } else {
+            line.appendChild(el("span", "v muted", "…"));
+            caption = "Loading";
+        }
+
+        const test = el("button", "test-btn", "Test");
+        test.type = "button";
+        test.dataset.test = id;
+        test.title = "Send one small request to measure this model now. It counts toward the free limit.";
+        line.appendChild(test);
+    }
+
+    const note = testNotes.get(id);
+    if (note && note.until > Date.now()) caption = note.text;
+
+    cell.appendChild(line);
+    if (caption) {
+        const small = el("span", "s", caption);
+        if (captionTitle) small.title = captionTitle;
+        cell.appendChild(small);
+    }
+}
+
+function fillLimit(cell, id) {
+    if (!cell) return;
+    cell.textContent = "";
+
+    const limits = live.limits || DEFAULT_LIMITS;
+    cell.appendChild(el("span", "v", limits.per_minute + " / min"));
+
+    const info = live.models[id];
+    let text = "No data";
+    let tone = "";
+
+    if (!info) {
+        text = live.state === "error" ? "Status unavailable" : "Checking…";
+    } else if (info.state === "throttled") {
+        text = "Rate limited " + ago(info.throttled_age_s);
+        tone = "warn";
+    } else if (info.state === "degraded") {
+        text = "Degraded";
+        tone = "warn";
+    } else if (info.state === "healthy") {
+        text = "Healthy";
+        tone = "ok";
+    }
+
+    const status = el("span", "s");
+    status.appendChild(el("i", "dot" + (tone ? " " + tone : "")));
+    status.appendChild(document.createTextNode(text));
+    cell.appendChild(status);
+}
+
+function modelRow(m) {
+    const row = el("div", "row");
+    row.dataset.id = m.id;
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-label", "Start a chat with " + m.name);
+
+    // Model
+    const model = el("div", "cell c-model");
+    model.appendChild(providerTile(m.provider));
+    const text = el("div", "model-text");
+    text.appendChild(el("span", "model-name", m.name));
+    const sub = el("div", "model-desc");
+    sub.appendChild(el("span", "prov", m.provider));
+    if (m.description) sub.appendChild(document.createTextNode(" · " + m.description));
+    text.appendChild(sub);
+    model.appendChild(text);
+    if (m.description) model.title = m.description;
+    row.appendChild(model);
+
+    // Context
+    const context = el("div", "cell context");
+    context.dataset.label = "Context";
+    const contextValue = el("span", "v", m.context_label || "—");
+    contextValue.title = (m.context || 0).toLocaleString("en-US") + " tokens";
+    context.appendChild(contextValue);
+    context.appendChild(el("span", "s", m.max_output_label ? m.max_output_label + " output" : "Output not stated"));
+    row.appendChild(context);
+
+    // Size
+    const size = el("div", "cell size");
+    size.dataset.label = "Size";
+    if (m.params_total_b) {
+        const value = el("span", "v", fmtBillions(m.params_total_b));
+        value.title = SIZE_SOURCES[m.params_source] || "";
+        size.appendChild(value);
+        size.appendChild(el("span", "s", m.params_active_b ? fmtBillions(m.params_active_b) + " active" : "Total parameters"));
+    } else {
+        const value = el("span", "v muted", "—");
+        value.title = "OpenRouter does not publish parameter counts, and this model does not state one.";
+        size.appendChild(value);
+        size.appendChild(el("span", "s", "Not stated"));
+    }
+    row.appendChild(size);
+
+    // Live: latency and rate limit
+    const latency = el("div", "cell latency");
+    latency.dataset.label = "Latency";
+    fillLatency(latency, m.id);
+    row.appendChild(latency);
+
+    const limit = el("div", "cell limit");
+    limit.dataset.label = "Rate limit";
+    limit.title = "Every free model shares one account-wide limit. Afterworld shows whether this model has recently been rate limited.";
+    fillLimit(limit, m.id);
+    row.appendChild(limit);
+
+    // Features
+    const features = el("div", "cell features");
+    const tags = el("div", "tags");
     abilityTags(m).forEach((label) => tags.appendChild(el("span", "tag", label)));
     if (m.intelligence !== null && m.intelligence !== undefined) {
-        const score = el("span", "tag", "Benchmark " + parseFloat(m.intelligence.toFixed(1)));
-        score.title = "Artificial Analysis Intelligence Index";
+        const score = el("span", "tag", "Score " + parseFloat(m.intelligence.toFixed(1)));
+        score.title = "Artificial Analysis Intelligence Index, reported by OpenRouter";
         tags.appendChild(score);
     }
     if (m.expires) {
@@ -1721,17 +1950,14 @@ function modelCard(m, index) {
         ends.title = "OpenRouter lists an end date for this free model";
         tags.appendChild(ends);
     }
-    if (tags.childNodes.length) card.appendChild(tags);
+    features.appendChild(tags);
+    row.appendChild(features);
 
-    const foot = el("span", "mc-foot");
-    foot.appendChild(el("span", "", m.created ? "Added " + fmtDate(m.created) : ""));
-    const go = el("span", "mc-go");
-    go.appendChild(document.createTextNode("Start chat"));
-    go.insertAdjacentHTML("beforeend", ARROW_ICON);
-    foot.appendChild(go);
-    card.appendChild(foot);
+    const go = el("div", "cell go");
+    go.innerHTML = CHEVRON_ICON;
+    row.appendChild(go);
 
-    return card;
+    return row;
 }
 
 function renderMeta() {
@@ -1742,7 +1968,6 @@ function renderMeta() {
     const total = catalog.count;
     dashMeta.appendChild(el("span", "", shown === total ? total + " free models" : shown + " of " + total + " free models"));
     dashMeta.appendChild(el("span", "", "Updated " + timeAgo(catalog.fetched_at)));
-    dashMeta.appendChild(el("span", "", "Source: OpenRouter API"));
 
     const refresh = el("button", "link-btn", catalogState === "loading" ? "Refreshing…" : "Refresh");
     refresh.type = "button";
@@ -1755,17 +1980,16 @@ function renderDashboard() {
     groupSeg.querySelectorAll("button").forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.group === dash.group));
     });
-    filtersBox.querySelectorAll(".filter-chip").forEach((chip) => {
-        chip.setAttribute("aria-pressed", String(dash.filters.has(chip.dataset.filter)));
+    filtersBox.querySelectorAll(".toggle").forEach((toggle) => {
+        toggle.setAttribute("aria-pressed", String(dash.filters.has(toggle.dataset.filter)));
     });
+    sortSelect.value = dash.sort;
 
     dashBody.textContent = "";
     renderMeta();
 
     if (!catalog && catalogState === "loading") {
-        const grid = el("div", "grid");
-        for (let i = 0; i < 6; i++) grid.appendChild(el("div", "skeleton"));
-        dashBody.appendChild(grid);
+        for (let i = 0; i < 7; i++) dashBody.appendChild(el("div", "skeleton-row"));
         return;
     }
 
@@ -1773,18 +1997,18 @@ function renderDashboard() {
         const box = el("div", "state-box err");
         box.appendChild(el("b", "", "Couldn't load the free models"));
         box.appendChild(el("span", "", catalogError || NETWORK_ERROR));
-        const retry = el("button", "ghost-btn", "Try again");
+        box.appendChild(document.createElement("br"));
+        const retry = el("button", "btn", "Try again");
         retry.type = "button";
         retry.id = "retry-catalog";
-        box.appendChild(document.createElement("br"));
         box.appendChild(retry);
         dashBody.appendChild(box);
         return;
     }
 
-    const models = filteredModels();
+    const groups = visibleGroups();
 
-    if (!models.length) {
+    if (!groups.length) {
         const box = el("div", "state-box");
         box.appendChild(el("b", "", "No models match"));
         box.appendChild(el("span", "", "Try a different search, or turn off a filter."));
@@ -1792,30 +2016,35 @@ function renderDashboard() {
         return;
     }
 
-    const config = catalog.groupings[dash.group];
-    const note = el("p", "group-note");
-    note.appendChild(el("b", "", "Grouped by " + config.title.toLowerCase() + ". "));
-    note.appendChild(document.createTextNode(config.hint + "."));
-    dashBody.appendChild(note);
+    const list = el("div", "list");
 
-    let index = 0;
-    for (const group of config.groups) {
-        const items = models
-            .filter((m) => m.tiers[dash.group] === group.key)
-            .sort((a, b) => (b.context - a.context) || a.name.localeCompare(b.name));
-        if (!items.length) continue;
+    const head = el("div", "list-head");
+    ["Model", "Context", "Size", "Latency", "Rate limit", "Features", ""].forEach((label) => {
+        head.appendChild(el("span", "", label));
+    });
+    head.children[4].title = "Every free model shares one account-wide limit";
+    list.appendChild(head);
 
+    for (const entry of groups) {
         const section = el("section", "group");
-        const head = el("div", "group-head");
-        head.appendChild(el("h2", "group-title", group.label));
-        head.appendChild(el("span", "group-count", String(items.length)));
-        section.appendChild(head);
+        const groupHead = el("div", "group-head");
+        groupHead.appendChild(el("h2", "group-title", entry.group.label));
+        groupHead.appendChild(el("span", "group-count", String(entry.items.length)));
+        section.appendChild(groupHead);
 
-        const grid = el("div", "grid");
-        items.forEach((m) => grid.appendChild(modelCard(m, index++)));
-        section.appendChild(grid);
-        dashBody.appendChild(section);
+        const rows = el("div", "rows");
+        entry.items.forEach((m) => rows.appendChild(modelRow(m)));
+        section.appendChild(rows);
+        list.appendChild(section);
     }
+
+    dashBody.appendChild(list);
+}
+
+function startFromRow(row) {
+    if (!catalog) return;
+    const model = catalog.models.find((m) => m.id === row.dataset.id);
+    if (model) startDraft(model, "picked", "");
 }
 
 dashBody.addEventListener("click", (event) => {
@@ -1823,11 +2052,23 @@ dashBody.addEventListener("click", (event) => {
         loadCatalog(false);
         return;
     }
-    const card = event.target.closest(".model-card");
-    if (!card || !catalog) return;
 
-    const model = catalog.models.find((m) => m.id === card.dataset.id);
-    if (model) startDraft(model, "picked", "");
+    const test = event.target.closest(".test-btn");
+    if (test) {
+        event.stopPropagation();
+        testModel(test.dataset.test);
+        return;
+    }
+
+    const row = event.target.closest(".row");
+    if (row) startFromRow(row);
+});
+
+dashBody.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target.classList.contains("row")) {
+        event.preventDefault();
+        startFromRow(event.target);
+    }
 });
 
 dashMeta.addEventListener("click", (event) => {
@@ -1838,14 +2079,20 @@ groupSeg.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-group]");
     if (!button) return;
     dash.group = button.dataset.group;
-    try { localStorage.setItem(STORE_GROUP, dash.group); } catch (error) { /* ignore */ }
+    writeStore("group", dash.group);
     renderDashboard();
 });
 
+sortSelect.addEventListener("change", () => {
+    dash.sort = SORT_KEYS.includes(sortSelect.value) ? sortSelect.value : "context";
+    writeStore("sort", dash.sort);
+    if (catalog) renderDashboard();
+});
+
 filtersBox.addEventListener("click", (event) => {
-    const chip = event.target.closest(".filter-chip");
-    if (!chip) return;
-    const key = chip.dataset.filter;
+    const toggle = event.target.closest(".toggle");
+    if (!toggle) return;
+    const key = toggle.dataset.filter;
     if (dash.filters.has(key)) dash.filters.delete(key); else dash.filters.add(key);
     renderDashboard();
 });
@@ -1855,12 +2102,143 @@ searchInput.addEventListener("input", () => {
     if (catalog) renderDashboard();
 });
 
+document.getElementById("jump-models").addEventListener("click", () => {
+    document.getElementById("models").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+/* ==========================================================
+   Live data: latency, health and the free-request counter
+   ========================================================== */
+
+function updateLivePanel() {
+    const limits = live.limits || DEFAULT_LIMITS;
+    liveMinOf.textContent = "of " + limits.per_minute;
+    liveDayOf.textContent = "of " + limits.per_day + ", or " + limits.per_day_with_credits.toLocaleString("en-US") + " after buying $10+ of credits";
+
+    if (live.state !== "ready") {
+        liveDot.classList.remove("on");
+        const text = live.state === "error" ? "Unavailable" : "…";
+        liveStamp.textContent = live.state === "error" ? "Couldn't load" : "Loading…";
+        liveFastest.textContent = text;
+        liveMin.textContent = text;
+        liveDay.textContent = text;
+        liveMinBar.style.width = "0";
+        return;
+    }
+
+    liveDot.classList.add("on");
+    updateLiveStamp();
+
+    // Fastest model right now
+    let best = null;
+    for (const [id, info] of Object.entries(live.models)) {
+        if (info.latency_ms === null || info.latency_ms === undefined) continue;
+        if (info.state === "throttled" || info.state === "degraded") continue;
+        if (!best || info.latency_ms < best.ms) best = { id: id, ms: info.latency_ms };
+    }
+
+    liveFastest.textContent = "";
+    if (best) {
+        const found = catalog && catalog.models.find((m) => m.id === best.id);
+        const name = el("b", "", found ? found.name : best.id);
+        liveFastest.appendChild(name);
+        liveFastest.appendChild(document.createTextNode(" "));
+        liveFastest.appendChild(el("span", "muted", fmtMs(best.ms)));
+    } else {
+        liveFastest.textContent = "No latency data yet";
+    }
+
+    const usage = live.usage || { minute: 0, day: 0 };
+    liveMin.textContent = String(usage.minute);
+    liveDay.textContent = String(usage.day);
+    liveMinBar.style.width = Math.min(100, (usage.minute / limits.per_minute) * 100) + "%";
+    liveMinBar.classList.toggle("hot", usage.minute >= limits.per_minute * 0.8);
+}
+
+function updateLiveStamp() {
+    if (live.state === "ready") liveStamp.textContent = "Updated " + ago((Date.now() - live.updatedAt) / 1000);
+}
+
+function updateLive() {
+    updateLivePanel();
+
+    dashBody.querySelectorAll(".row").forEach((row) => {
+        fillLatency(row.querySelector(".cell.latency"), row.dataset.id);
+        fillLimit(row.querySelector(".cell.limit"), row.dataset.id);
+    });
+
+    // When sorting by speed, reorder the rows if the order changed
+    if (dash.sort === "latency" && catalog) {
+        const shown = Array.from(dashBody.querySelectorAll(".row")).map((row) => row.dataset.id).join(",");
+        const wanted = visibleGroups().map((entry) => entry.items.map((m) => m.id).join(",")).filter(Boolean).join(",");
+        if (shown !== wanted) renderDashboard();
+    }
+}
+
+async function loadLive() {
+    if (live.loading) return;
+    live.loading = true;
+
+    try {
+        const res = await fetch("/api/live", { cache: "no-store" });
+        if (!res.ok) throw new ApiError(await readError(res));
+
+        const data = await res.json();
+        live.models = data.models || {};
+        live.usage = data.usage || null;
+        live.limits = data.limits || null;
+        live.updatedAt = Date.now();
+        live.state = "ready";
+    } catch (error) {
+        console.warn("Could not load live data:", error);
+        if (live.state !== "ready") live.state = "error";
+    } finally {
+        live.loading = false;
+    }
+
+    updateLive();
+}
+
+async function testModel(id) {
+    if (testing.has(id)) return;
+    testing.add(id);
+    updateLive();
+
+    let text = "Test failed";
+    try {
+        const res = await fetch("/api/probe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: id })
+        });
+        if (!res.ok) throw new ApiError(await readError(res));
+        const data = await res.json();
+        text = data.ok ? "Measured just now" : (data.throttled ? "Rate limited just now" : "Didn't answer");
+    } catch (error) {
+        console.warn(error);
+        text = error instanceof ApiError ? error.message : NETWORK_ERROR;
+    }
+
+    testNotes.set(id, { text: text, until: Date.now() + 6000 });
+    testing.delete(id);
+    await loadLive();
+    setTimeout(updateLive, 6200);
+}
+
+setInterval(() => {
+    if (view === "dashboard" && !document.hidden && catalogState === "ready") loadLive();
+}, LIVE_REFRESH_MS);
+setInterval(updateLiveStamp, 15000);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && view === "dashboard" && catalogState === "ready" && Date.now() - live.updatedAt > 20000) loadLive();
+});
+
 /* ---------- Random fast model ---------- */
 
 function setRandomUi(state, message) {
     randomButton.classList.toggle("busy", state === "busy");
     randomButton.disabled = state === "busy";
-    randomLabel.textContent = state === "busy" ? "Checking speeds…" : "Pick one for me";
+    randomLabel.textContent = state === "busy" ? "Checking speeds…" : "Random fast model";
     randomHint.classList.toggle("err", state === "error");
 
     if (state === "busy") {
@@ -1889,6 +2267,7 @@ async function pickRandom() {
         setRandomUi("error", error instanceof ApiError ? error.message : NETWORK_ERROR);
     } finally {
         randomBusy = false;
+        if (view === "dashboard") loadLive();
     }
 }
 
@@ -1906,28 +2285,59 @@ function scrollToBottom() {
     chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-function addUserMessage(text) {
+function imageThumb(ref) {
+    const image = document.createElement("img");
+    image.className = "bubble-img";
+    image.alt = ref.name || "Attached image";
+    image.decoding = "async";
+
+    imageStore.get(ref.id).then((url) => {
+        if (url) {
+            image.src = url;
+        } else {
+            image.replaceWith(el("span", "img-missing", "Image no longer available"));
+        }
+    });
+    return image;
+}
+
+function addUserMessage(text, images) {
     const message = el("article", "msg user");
-    message.appendChild(el("div", "bubble", text));
+    const bubble = el("div", "bubble");
+
+    if (images && images.length) {
+        const row = el("div", "bubble-images");
+        images.forEach((ref) => row.appendChild(imageThumb(ref)));
+        bubble.appendChild(row);
+    }
+    if (text) bubble.appendChild(el("span", "bubble-text", text));
+
+    message.appendChild(bubble);
     thread.appendChild(message);
 }
 
 function createAssistantView(modelId) {
-    const message = document.createElement("article");
-    message.className = "msg assistant";
-    message.innerHTML =
-        '<div class="avatar sm" aria-hidden="true"><svg><use href="#icon-bot"/></svg></div>' +
-        '<div class="body">' +
-            '<div class="who"><span class="who-name"></span><span class="model msg-model"></span></div>' +
-            '<div class="content"><span class="typing" role="status" aria-label="Afterworld is typing"><i></i><i></i><i></i></span></div>' +
-            '<div class="actions"></div>' +
-        "</div>";
+    const message = el("article", "msg assistant");
+    message.appendChild(markTile(true));
 
-    message.querySelector(".who-name").textContent = APP_NAME;
-    message.querySelector(".msg-model").textContent = modelId || "";
+    const body = el("div", "body");
+    const who = el("div", "who");
+    who.appendChild(el("span", "who-name", APP_NAME));
+    who.appendChild(el("span", "model msg-model", modelId || ""));
+    body.appendChild(who);
 
-    const content = message.querySelector(".content");
-    const actions = message.querySelector(".actions");
+    const content = el("div", "content");
+    const typing = el("span", "typing");
+    typing.setAttribute("role", "status");
+    typing.setAttribute("aria-label", APP_NAME + " is typing");
+    typing.innerHTML = "<i></i><i></i><i></i>";
+    content.appendChild(typing);
+    body.appendChild(content);
+
+    const actions = el("div", "actions");
+    body.appendChild(actions);
+    message.appendChild(body);
+
     let raw = "";
     let frame = 0;
 
@@ -2005,7 +2415,7 @@ function renderChat(convo) {
 
     convo.messages.forEach((m, index) => {
         if (m.role === "user") {
-            addUserMessage(m.content);
+            addUserMessage(m.content, m.images);
             return;
         }
 
@@ -2035,10 +2445,120 @@ async function copyText(text, button) {
 }
 
 chatArea.addEventListener("click", (event) => {
+    const image = event.target.closest(".bubble-img");
+    if (image && image.src) {
+        openLightbox(image.src);
+        return;
+    }
+
     const button = event.target.closest(".copy-code");
     if (!button) return;
     const code = button.closest(".code").querySelector("pre").textContent;
     copyText(code, button);
+});
+
+/* ==========================================================
+   Attachments in the composer
+   ========================================================== */
+
+function flashHint(text) {
+    hintBox.textContent = text;
+    hintBox.classList.add("warn");
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+        hintBox.textContent = HINT_DEFAULT;
+        hintBox.classList.remove("warn");
+    }, 4500);
+}
+
+function renderPending() {
+    attachmentsBox.textContent = "";
+    attachmentsBox.hidden = pending.length === 0;
+
+    pending.forEach((item) => {
+        const box = el("div", "att");
+        const image = document.createElement("img");
+        image.src = item.dataUrl;
+        image.alt = item.name;
+
+        const remove = el("button", "att-remove", "×");
+        remove.type = "button";
+        remove.dataset.id = item.id;
+        remove.setAttribute("aria-label", "Remove " + item.name);
+
+        box.appendChild(image);
+        box.appendChild(remove);
+        attachmentsBox.appendChild(box);
+    });
+}
+
+function clearPending() {
+    pending = [];
+    attachEpoch++;
+    renderPending();
+    updateSendState();
+}
+
+async function addFiles(fileList) {
+    if (!modelAcceptsImages()) {
+        flashHint("This model doesn't accept images.");
+        return;
+    }
+
+    const epoch = attachEpoch;
+
+    for (const file of Array.from(fileList)) {
+        if (pending.length >= MAX_IMAGES_PER_MESSAGE) {
+            flashHint("You can attach up to " + MAX_IMAGES_PER_MESSAGE + " images per message.");
+            break;
+        }
+
+        try {
+            const item = await prepareImage(file);
+            if (epoch !== attachEpoch) return;   // the chat changed while the image was being prepared
+
+            if (pending.length >= MAX_IMAGES_PER_MESSAGE) {
+                flashHint("You can attach up to " + MAX_IMAGES_PER_MESSAGE + " images per message.");
+                break;
+            }
+            pending.push(item);
+            renderPending();
+            updateSendState();
+        } catch (error) {
+            flashHint(error.message);
+        }
+    }
+}
+
+attachButton.addEventListener("click", () => {
+    if (!attachButton.disabled) fileInput.click();
+});
+
+fileInput.addEventListener("change", () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = "";
+    if (files.length) addFiles(files);
+});
+
+attachmentsBox.addEventListener("click", (event) => {
+    const remove = event.target.closest(".att-remove");
+    if (remove) {
+        pending = pending.filter((item) => item.id !== remove.dataset.id);
+        renderPending();
+        updateSendState();
+        return;
+    }
+    const image = event.target.closest("img");
+    if (image) openLightbox(image.src);
+});
+
+input.addEventListener("paste", (event) => {
+    const files = Array.from((event.clipboardData && event.clipboardData.files) || [])
+        .filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+
+    event.preventDefault();
+    addFiles(files);
 });
 
 /* ==========================================================
@@ -2052,21 +2572,28 @@ function stopStreaming() {
 function openDashboard() {
     closeDrawer();
     stopStreaming();
+    clearPending();
 
     activeId = null;
     draft = null;
     saveActive();
 
     showView("dashboard");
+    updateAttachState();
     renderSidebar();
     viewDash.scrollTop = 0;
 
-    if (catalogState === "idle" || catalogState === "error") loadCatalog(false);
+    if (catalogState === "idle" || catalogState === "error") {
+        loadCatalog(false);
+    } else if (Date.now() - live.updatedAt > 20000) {
+        loadLive();
+    }
 }
 
 function startDraft(model, origin, note) {
     closeDrawer();
     stopStreaming();
+    clearPending();
 
     activeId = null;
     saveActive();
@@ -2074,9 +2601,10 @@ function startDraft(model, origin, note) {
 
     thread.textContent = "";
     welcome.hidden = false;
-    welcomeTitle.textContent = "Chat with " + draft.model.name;
-    welcomeSub.textContent = [draft.model.provider, draft.model.context_label && draft.model.context_label + " context"]
-        .filter(Boolean).join(", ");
+    welcomeTitle.textContent = "New chat with " + draft.model.name;
+    welcomeSub.textContent = draft.model.vision
+        ? "Ask anything, or attach an image to get started."
+        : "Ask anything to get started.";
 
     showView("chat");
     renderBanner();
@@ -2094,6 +2622,7 @@ function openChat(id) {
     if (!convo) return;
 
     stopStreaming();
+    clearPending();
     activeId = id;
     draft = null;
     saveActive();
@@ -2114,6 +2643,7 @@ function deleteChat(id) {
     const wasActive = id === activeId;
     if (wasActive) stopStreaming();
 
+    removeChatImages(convo);
     chats = chats.filter((c) => c.id !== id);
     saveChats();
 
@@ -2131,7 +2661,7 @@ function deleteChat(id) {
 function updateSendState() {
     sendButton.classList.toggle("is-stop", busy);
     sendButton.setAttribute("aria-label", busy ? "Stop generating" : "Send message");
-    sendButton.disabled = !busy && !input.value.trim();
+    sendButton.disabled = !busy && !input.value.trim() && pending.length === 0;
 }
 
 function autosize() {
@@ -2139,11 +2669,33 @@ function autosize() {
     input.style.height = Math.min(input.scrollHeight, 180) + "px";
 }
 
-function buildPayload(convo) {
-    return convo.messages
-        .filter((m) => !m.error && m.content && m.content.trim())
-        .map((m) => ({ role: m.role, content: m.content }))
+// The most recent images travel with the history so the model can still see them
+async function buildPayload(convo) {
+    const usable = convo.messages
+        .filter((m) => !m.error && ((m.content && m.content.trim()) || (m.images && m.images.length)))
         .slice(-40);
+
+    let budget = MAX_CONTEXT_IMAGES;
+    const out = [];
+
+    for (let i = usable.length - 1; i >= 0; i--) {
+        const m = usable[i];
+        const item = { role: m.role, content: m.content || "" };
+
+        if (m.role === "user" && m.images && m.images.length && budget > 0) {
+            const urls = [];
+            for (const ref of m.images.slice(0, budget)) {
+                const url = await imageStore.get(ref.id);
+                if (url) urls.push(url);
+            }
+            budget -= urls.length;
+            if (urls.length) item.images = urls;
+        }
+
+        if (item.content.trim() || item.images) out.unshift(item);
+    }
+
+    return out;
 }
 
 async function readError(response) {
@@ -2156,8 +2708,10 @@ async function readError(response) {
     return "The server returned an error (" + response.status + "). Check the terminal running main.py.";
 }
 
-function sendMessage(text) {
+function sendMessage(text, images) {
+    images = images || [];
     if (busy || view !== "chat") return;
+    if (images.length && !modelAcceptsImages()) return;
 
     let convo = getActiveChat();
     if (!convo) {
@@ -2175,7 +2729,13 @@ function sendMessage(text) {
             messages: []
         };
         chats.unshift(convo);
-        if (chats.length > MAX_CHATS) chats = sortedChats().slice(0, MAX_CHATS);
+
+        if (chats.length > MAX_CHATS) {
+            const keep = sortedChats().slice(0, MAX_CHATS);
+            chats.filter((c) => !keep.includes(c)).forEach(removeChatImages);
+            chats = keep;
+        }
+
         activeId = convo.id;
         draft = null;
         saveActive();
@@ -2184,13 +2744,16 @@ function sendMessage(text) {
     // A new message replaces the buttons on any old error
     thread.querySelectorAll(".note .mini-btn").forEach((button) => button.remove());
 
+    const refs = images.map((image) => ({ id: image.id, name: image.name }));
+    images.forEach((image) => imageStore.put(image.id, image.dataUrl));
+
     welcome.hidden = true;
-    convo.messages.push({ role: "user", content: text, model: null, error: false });
+    convo.messages.push({ role: "user", content: text, model: null, error: false, images: refs });
     convo.updatedAt = Date.now();
     saveChats();
     renderSidebar();
 
-    addUserMessage(text);
+    addUserMessage(text, refs);
     scrollToBottom();
     streamReply(convo);
 }
@@ -2223,10 +2786,12 @@ async function streamReply(convo) {
     let answer = "";
 
     try {
+        const payload = await buildPayload(convo);
+
         const response = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: modelId, messages: buildPayload(convo) }),
+            body: JSON.stringify({ model: modelId, messages: payload }),
             signal: myController.signal
         });
 
@@ -2255,7 +2820,7 @@ async function streamReply(convo) {
             throw new ApiError("The model returned an empty reply. Try again or choose another model.");
         }
 
-        convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false });
+        convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false, images: [] });
         bot.update(answer);
         bot.finish();
 
@@ -2263,7 +2828,7 @@ async function streamReply(convo) {
 
         if (error.name === "AbortError") {
             if (answer.trim()) {
-                convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false });
+                convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false, images: [] });
                 bot.finish();
             } else {
                 bot.remove();
@@ -2273,10 +2838,10 @@ async function streamReply(convo) {
             const text = error instanceof ApiError ? error.message : NETWORK_ERROR;
 
             if (answer.trim()) {
-                convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false });
+                convo.messages.push({ role: "assistant", content: answer, model: modelId, error: false, images: [] });
                 bot.fail(text, null, openDashboard);
             } else {
-                convo.messages.push({ role: "assistant", content: text, model: null, error: true });
+                convo.messages.push({ role: "assistant", content: text, model: null, error: true, images: [] });
                 bot.fail(text, () => retryLast(convo), openDashboard);
             }
         }
@@ -2309,12 +2874,13 @@ form.addEventListener("submit", (event) => {
     }
 
     const text = input.value.trim();
-    if (!text) return;
+    const images = pending.slice();
+    if (!text && !images.length) return;
 
     input.value = "";
     autosize();
-    updateSendState();
-    sendMessage(text);
+    clearPending();
+    sendMessage(text, images);
 });
 
 input.addEventListener("input", () => {
@@ -2329,14 +2895,15 @@ input.addEventListener("keydown", (event) => {
     }
 });
 
-document.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-        if (!busy) sendMessage(chip.dataset.prompt);
+document.querySelectorAll(".suggest button").forEach((button) => {
+    button.addEventListener("click", () => {
+        if (!busy) sendMessage(button.dataset.prompt);
     });
 });
 
 document.getElementById("new-chat").addEventListener("click", openDashboard);
 dashButton.addEventListener("click", openDashboard);
+brandLink.addEventListener("click", openDashboard);
 
 // Start up
 renderSidebar();
@@ -2352,9 +2919,11 @@ if (startChat) {
     showView("dashboard");
 }
 
+updateLivePanel();
 renderDashboard();
 loadCatalog(false);
 updateSendState();
+updateAttachState();
 focusInput();
 </script>
 
