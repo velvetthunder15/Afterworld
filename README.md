@@ -1,572 +1,370 @@
-# CRChatbot
+# Afterworld
 
-A lightweight web app for comparing and using free LLMs under real-world constraints.
+Afterworld is a cloud hosted LLM platform built to explore how free language models perform under practical deployment conditions.
 
-CRChatbot was built around a simple question:
+The project combines a web interface, a FastAPI backend, Azure App Service hosting, and OpenRouter as the model access layer. Its longer term purpose is to compare free LLMs not only by benchmark scores, but also by the conditions under which those models are actually accessed.
 
-> **When free LLMs are rate limited and accessed through a cloud hosted application, which models actually make the most sense for different use cases?**
+The central question is:
 
-A model can have a strong benchmark score and still be frustrating to use if its endpoint is slow, unavailable, or frequently rate limited. On the other hand, a very fast model may not be the right choice when reasoning quality, context length, or multimodal input matters.
-
-CRChatbot tries to keep those factors separate instead of collapsing everything into one score.
+> **How do free LLMs compare when they are used through a rate limited, cloud hosted application?**
 
 ---
 
-## What the project does
+## I. Project Overview
 
-CRChatbot connects to OpenRouter and builds a live catalog of currently available free chat models.
+Afterworld currently provides a web based interface for browsing and using free LLMs available through OpenRouter.
 
-For each model, the dashboard can show:
+The application dynamically retrieves the available free chat models and presents information such as:
 
 - Model and provider
 - Context window
 - Maximum output length
-- Parameter count when the model itself states it
+- Supported input types
 - Reasoning support
-- Tool calling support
-- Image input support
-- Artificial Analysis Intelligence Index score, when available
-- Model creation date
-- Free access expiration date, when provided
-
-The dashboard can group models by:
-
-- Context window
 - Model size
-- Benchmark score
-- Input type
-- Provider
+- AAII score, where available
+- Free availability and expiration information
 
-Models can also be filtered by reasoning, tool calling, and image input.
+Models can be searched, filtered, and grouped by context size, model size, benchmark score, input type, and provider.
 
-The model catalog is loaded from OpenRouter rather than being hard coded, which matters because the free model pool changes over time. The backend filters the API response down to models that are currently free, usable for text chat, and not expired. The application also avoids treating router aliases, embedding models, rerankers, and safety classifiers as normal chat models.
-
----
-
-## The main idea
-
-The project is not intended to answer:
-
-> "Which LLM is the best?"
-
-That question is usually too broad to be useful.
-
-Instead, the project is intended to make questions like these measurable:
-
-- Which free models have the strongest benchmark scores?
-- Which models have the lowest current latency?
-- Which models still respond reliably when the free pool is under load?
-- Which models offer large context windows?
-- Which models support reasoning, tools, or images?
-- How much does deployment location affect the experience?
-- Does a model that looks strong on a benchmark still make sense when its free endpoint is rate limited?
-- Does the fastest model provide enough quality for the task?
-
-The eventual goal is to identify strong candidates **within individual categories**, rather than pretending that one number can describe every useful property of a model.
+A model can then be selected for a dedicated conversation, with the selected model remaining fixed throughout that conversation.
 
 ---
 
-# Why free models are interesting
+## II. Project Objective
 
-Free inference is useful for experimentation, student projects, prototypes, and small applications, but "free" does not mean unrestricted.
+Afterworld is designed around a distinction between **model capability** and **service performance**.
 
-At the time of writing, OpenRouter lists 50 requests per day on its free tier. OpenRouter also documents a 20 requests per minute limit for free models, while individual providers can impose additional limits and availability constraints. The exact free model pool also changes over time. [1][2]
+A model may perform well on external benchmarks but still be difficult to use through a free endpoint because of rate limits, provider load, network conditions, or temporary unavailability.
 
-That makes free LLMs an interesting benchmarking environment because performance is affected by more than the model weights themselves.
-
-A useful comparison therefore needs to consider at least two layers:
+The project therefore uses three layers:
 
 ```text
 Model capability
         +
-Inference service behavior
+Inference service conditions
         +
-Network / cloud location
+Cloud deployment conditions
         =
-Actual application experience
+Practical model performance
 ```
 
-This project focuses on the second and third parts alongside the benchmark information already provided by OpenRouter.
+The current implementation establishes the platform needed for this comparison. Later versions will add controlled benchmark experiments and repeated measurements.
 
 ---
 
-# Benchmark data
+## III. System Architecture
 
-CRChatbot currently uses the **Artificial Analysis Intelligence Index** when OpenRouter provides a score for a model.
+Azure App Service is the primary hosting environment for Afterworld.
 
-This is important to understand:
+The application is intended to run as a publicly accessible cloud service rather than as a local-only application.
 
-**CRChatbot does not calculate the Intelligence Index itself.**
+```text
+                         USER
+                          |
+                          v
+                 +------------------+
+                 |   Web Browser     |
+                 |   HTML / JS / CSS |
+                 +--------+---------+
+                          |
+                          | HTTPS
+                          v
+                 +------------------+
+                 |  Azure App       |
+                 |  Service         |
+                 |                  |
+                 |  FastAPI backend  |
+                 |  Static HTML frontend |
+                 +--------+---------+
+                          |
+                          | OpenAI compatible API
+                          v
+                 +------------------+
+                 |   OpenRouter     |
+                 +--------+---------+
+                          |
+                          v
+                 +------------------+
+                 | Free LLM Provider |
+                 | / Model Endpoint  |
+                 +------------------+
+```
 
-The score is obtained from OpenRouter's model metadata, where the benchmark is attributed to Artificial Analysis.
+### III.I Azure App Service
 
-Artificial Analysis describes its Intelligence Index as a composite evaluation covering areas including reasoning, knowledge, mathematics, programming, and agentic work. The current methodology combines ten evaluations into a weighted index. Artificial Analysis also explicitly notes that the index has limitations and should not be treated as a perfect measure for every use case. [3][4]
+Azure App Service hosts the running FastAPI application and provides the public web endpoint.
 
-So the benchmark number shown in CRChatbot should be interpreted as:
+The cloud server is responsible for:
 
-> **A useful external measure of general model capability, not a complete measure of how good the model will be for this application.**
+- Serving the Afterworld frontend
+- Running the FastAPI backend
+- Communicating with OpenRouter
+- Processing model metadata
+- Handling chat requests
+- Streaming model responses back to the browser
+- Performing model availability and latency checks
 
-That distinction is central to the project.
+The FastAPI application and frontend were deployed to the App Service, with the OpenRouter API key stored as an Azure application setting rather than inside the source code.
+The B1 plan provided the initial paid compute environment for development. The F1 plan is used for the current lightweight deployment, with its resource and usage limits.
+
+Azure App Service also provides the public azurewebsites.net endpoint used to access Afterworld over the internet.
+
+This is also important for the later benchmarking work because cloud region and network routing can affect observed performance.
+
+### III.II FastAPI Backend
+
+`main.py` contains the backend application.
+
+It handles:
+
+- OpenRouter authentication
+- Model catalog retrieval
+- Free-model filtering
+- Model metadata processing
+- Endpoint status and latency information
+- Random fast-model selection
+- Chat requests
+- Streaming responses
+- Retry and error handling
+
+The backend uses OpenRouter's OpenAI compatible API endpoint.
+
+### III.III Frontend
+
+`index.html` contains the complete web interface.
+
+It provides:
+
+- Model discovery
+- Search
+- Model grouping
+- Capability filters
+- Random fast-model selection
+- Chat sessions
+- Streaming responses
+- Browser based chat history
+
+Chat history is stored locally in the browser using `localStorage`.
 
 ---
 
-# Live latency testing
+## IV. Model Catalog
 
-Benchmark scores tell us about model capability. They do not tell us what happens when an actual request is sent through a free provider.
+Afterworld does not maintain a manually updated list of models.
 
-CRChatbot therefore adds a live latency layer.
+The backend retrieves the model catalog from OpenRouter and filters the response to retain currently available free chat models.
 
-OpenRouter exposes recent endpoint statistics for models, including:
+The filtering process excludes:
 
-- Recent median latency
-- Endpoint health
-- Recent uptime
+- Paid models
+- Expired models
+- Router aliases
+- Non chat models
+- Embedding models
+- Rerankers
+- Safety classifiers
+- Models without suitable text chat support
 
-The application checks free endpoints and uses the available latency information to identify models that are currently responsive.
+Model information is then normalized into a format used by the frontend.
 
-The backend also performs a small live probe:
-
-```text
-Request:
-"Say hi."
-
-Maximum output:
-16 tokens
-
-Measurement:
-request start -> first generated output
-```
-
-The value recorded here is essentially a **time-to-first-output measurement**, rather than the time required to generate the entire answer.
-
-This distinction matters. A model can produce its first token quickly and still generate the rest of the answer slowly.
+Parameter counts are only shown when they can be identified from information explicitly provided by the model, such as its model identifier, Hugging Face identifier, or description. The application does not invent missing parameter counts.
 
 ---
 
-# The "Random Fast Model" system
+## V. Model Selection
 
-One of the more interesting parts of the application is the **Random Fast Model** button.
+Afterworld supports normal manual model selection as well as a **Random Fast Model** option.
 
-It does not simply select a random model.
+The random selection process does not choose from every free model equally.
 
-The current selection process is:
-
-```text
-1. Load the current free model catalog
-2. Get recent latency information
-3. Remove models currently considered unhealthy
-4. Sort available models by latency
-5. Take the fastest few
-6. Randomize among that small group
-7. Send a live probe
-8. Keep the model only if it responds
-9. Use that model for the chat
-```
-
-The application currently considers the three fastest models as the primary random selection pool.
-
-If recent latency information is unavailable, it switches to live probing. Several random models are tested concurrently and the fastest responding model in the batch is selected.
-
-The important part is that the randomness happens **among models that already look fast**, rather than across the entire free catalog.
-
-That gives the feature some variety without deliberately choosing a slow model.
-
----
-
-# Rate-limited conditions
-
-Free LLM inference behaves differently from a private or paid deployment.
-
-A request can fail because:
-
-- The model is temporarily unavailable
-- The provider is rate limiting requests
-- OpenRouter returns a transient server error
-- The endpoint has poor recent health
-- The model has disappeared from the free catalog
-- The API request times out
-
-CRChatbot handles several transient failures with retries.
-
-The backend retries selected HTTP failures such as:
+It first considers recent latency and endpoint health information, identifies a small pool of fast responding models, and then performs a live probe before selecting one.
 
 ```text
-408
-429
-500
-502
-503
-504
-```
-
-with short delays between attempts.
-
-However, there is an important design choice:
-
-> **A chat does not silently switch models after the user has selected one.**
-
-Once a model has been chosen, the conversation stays with that model. This means the application can be used for an actual model comparison without silently changing the variable being tested.
-
-That is particularly important for benchmarking.
-
-If Model A starts a conversation and the application silently changes to Model B after Model A is rate limited, the resulting conversation is no longer a clean test of Model A.
-
----
-
-# Cloud hosted conditions
-
-CRChatbot is also intended to be evaluated as a cloud hosted application.
-
-This introduces another variable that is easy to miss.
-
-A locally run application might have this path:
-
-```text
-Browser
-   |
-   v
-OpenRouter
-   |
-   v
-Model provider
-```
-
-A cloud hosted deployment looks more like:
-
-```text
-Browser
-   |
-   v
-Cloud server
-   |
-   v
-OpenRouter
-   |
-   v
-Model provider
-```
-
-That means deployment location matters.
-
-For example, the same model can behave differently for a user in India and a user in the United States because the browser-to-cloud and cloud-to-provider network paths are different.
-
-The current CRChatbot latency probe measures latency from the **backend to the model service**, not full browser-to-browser response time.
-
-This gives us two useful but different measurements:
-
-### Backend latency
-
-```text
-Cloud server -> OpenRouter -> model endpoint
-```
-
-This is what the current live probe is primarily measuring.
-
-### User perceived latency
-
-```text
-Browser -> cloud server -> OpenRouter -> model
-        -> cloud server -> browser
-```
-
-A proper comparison of cloud regions should therefore deploy the same application in multiple regions and measure both.
-
-This creates a useful experimental setup for comparing:
-
-```text
-Model
-Provider
-Rate-limit state
-Cloud region
-Time of day
-Latency
-Reliability
-Benchmark score
-```
-
-without changing the rest of the application.
-
----
-
-# What the current version measures
-
-| Metric | Current support | Source |
-|---|---|---|
-| Benchmark score | Yes | OpenRouter metadata / Artificial Analysis |
-| Context window | Yes | OpenRouter model metadata |
-| Maximum output | Yes | OpenRouter model metadata |
-| Model size | Yes, when explicitly stated | Model ID, Hugging Face ID, or description |
-| Input modality | Yes | OpenRouter architecture metadata |
-| Reasoning support | Yes | OpenRouter model metadata |
-| Tool calling | Yes | OpenRouter model metadata |
-| Recent endpoint latency | Yes | OpenRouter endpoint data |
-| Live time to first output | Yes | CRChatbot live probe |
-| Current endpoint health | Yes | OpenRouter endpoint data |
-| Rate-limit failures | Yes | Live requests |
-| Browser end-to-end latency | Not yet | Requires client-side measurement |
-| Tokens per second | Not yet | Requires full generation measurement |
-| Long-term reliability | Not yet | Requires repeated benchmark runs |
-| Task-specific quality | Not yet | Requires a controlled evaluation set |
-
-That last distinction is intentional.
-
-The current version is primarily a **live comparison and model selection layer**. A more complete research benchmark can be built on top of it.
-
----
-
-# Proposed benchmark framework
-
-A serious comparison should not produce one giant ranking.
-
-Instead, models should be evaluated independently across several dimensions.
-
-## 1. Capability
-
-Use externally reported benchmark information such as the Artificial Analysis Intelligence Index.
-
-Possible metric:
-
-```text
-Capability score = external benchmark score
-```
-
-This answers:
-
-> How capable is the model according to a standardized external evaluation?
-
----
-
-## 2. Latency
-
-Measure time to first output and full completion time.
-
-Useful measurements:
-
-```text
-TTFT  = time to first token
-E2E   = total request time
-TPS   = generated tokens / generation time
-```
-
-TTFT is especially useful for chat applications because users notice the delay before the response starts.
-
----
-
-## 3. Reliability
-
-Run the same request many times and record:
-
-```text
-Successful requests
-Rate-limited requests
-Timeouts
-Server errors
-Empty responses
-Successful response percentage
-```
-
-A simple reliability measure could be:
-
-```text
-Reliability =
-successful requests / total requests
-```
-
-This is more informative than testing a model once.
-
----
-
-## 4. Free-tier resilience
-
-This is one of the main points of the project.
-
-The same model can be tested under:
-
-```text
-Low traffic
-Moderate traffic
-Repeated requests
-Near rate-limit conditions
-High contention periods
-```
-
-This allows the project to distinguish model quality from access quality.
-
----
-
-## 5. Context capability
-
-Measure whether a model can actually handle progressively larger prompts.
-
-For example:
-
-```text
-8K
-16K
-32K
-64K
-128K
-256K
-...
-```
-
-The advertised context window is not necessarily the same thing as the context that works reliably through a particular free endpoint.
-
----
-
-## 6. Multimodal capability
-
-Separate:
-
-```text
-Text only
-Text + image
-Text + audio
-Text + video
-```
-
-A model should not be treated as superior merely because it supports more input types. The useful question is whether those capabilities work reliably for the intended task.
-
----
-
-# Recommended experimental protocol
-
-For a proper model comparison, every candidate should receive the same conditions.
-
-```text
-Same prompt
-Same system instructions
-Same maximum output
-Same temperature
-Same number of repetitions
-Same cloud region
-Same time window
-Same API route
-```
-
-A sensible experiment would run each task repeatedly instead of relying on a single request.
-
-For example:
-
-```text
-20 to 50 trials per model
+Free model catalog
         |
-        +-- Success rate
-        +-- Rate-limit rate
-        +-- TTFT
-        +-- Total latency
-        +-- Tokens/sec
-        +-- Output quality
-        +-- Benchmark score
+        v
+Recent endpoint information
+        |
+        v
+Healthy models
+        |
+        v
+Fastest model group
+        |
+        v
+Live response check
+        |
+        v
+Selected model
 ```
 
-Results should then be reported by category.
+Once a model is selected for a conversation, that model remains fixed for the conversation.
 
-For example:
+This prevents an automatic model switch from changing the conditions of a comparison midway through a chat.
+
+---
+
+## VI. Rate Limited Free Inference
+
+Free model access introduces an additional experimental variable.
+
+Availability can depend on:
+
+- OpenRouter limits
+- Provider limits
+- Endpoint load
+- Temporary service failures
+- Model availability
+- Request frequency
+
+Afterworld handles common temporary API failures through retry logic while keeping the selected model unchanged.
+
+This behavior is important for future experiments because switching to another model after a failure would make a comparison between models less controlled.
+
+---
+
+## VII. Current Benchmark Basis
+
+The current interface displays the **Artificial Analysis Intelligence Index** when that information is available through OpenRouter.
+
+The Intelligence Index is an external composite benchmark covering areas including agents, coding, general capability, and scientific reasoning. Artificial Analysis currently combines ten evaluations into the index and notes that individual benchmark results may be more useful for specific workloads.
+
+Afterworld uses this score as **external benchmark metadata**.
+
+It does not currently run the Artificial Analysis benchmark suite itself.
+
+This distinction is important: the current system provides the platform and data required for comparison, while the controlled benchmarking system is part of future development.
+
+---
+
+## VIII. Benchmarking Roadmap
+
+Future versions of Afterworld are intended to turn the platform into a controlled comparison environment for free LLMs.
+
+### VIII.I Capability benchmarks
+
+Models can be evaluated across task categories such as:
+
+- General reasoning
+- Mathematics
+- Coding
+- Knowledge
+- Instruction following
+- Scientific reasoning
+- Long context tasks
+- Multimodal tasks
+
+External benchmark data can be used alongside task specific tests.
+
+### VIII.II Latency benchmarks
+
+The platform can later record:
+
+- Time to first token
+- Total response time
+- Tokens per second
+- Response length
+- Latency distribution over repeated trials
+
+The existing backend already includes a small live first output probe, but this is intended as an availability check rather than a complete performance benchmark.
+
+### VIII.III Reliability benchmarks
+
+Repeated requests can be used to measure:
+
+- Successful responses
+- Timeouts
+- HTTP errors
+- Rate limit responses
+- Empty responses
+- Successful response percentage
+
+### VIII.IV Rate limit testing
+
+Models can be tested under controlled request loads to study how free access behaves under increasing demand.
+
+### VIII.V Cloud region testing
+
+Because Afterworld is hosted through Azure App Service, the same application can later be deployed across different Azure regions.
+This can be used to study how cloud location affects response time and user perceived performance.
+
+### VIII.VI Category based comparison
+
+The final benchmarking system is intended to avoid treating one model as universally superior.
+
+Instead, results can be separated into categories such as:
 
 ```text
-Quality
-Latency
+Reasoning
+Coding
+Speed
 Reliability
 Long context
-Reasoning
-Multimodal
-Cloud response time
-Free-tier resilience
+Multimodal capability
+Rate-limit resilience
+Cloud latency
 ```
 
-This avoids creating a misleading "overall winner" when the real answer depends on what the application needs.
+The purpose is to identify useful model choices within each category based on measured evidence.
 
 ---
 
-# Architecture
+## IX. Deployment
 
-The application has two main parts.
+### IX.I Production environment
+
+The primary deployment environment is:
 
 ```text
-                    +----------------------+
-                    |      Browser UI      |
-                    |      index.html      |
-                    +----------+-----------+
-                               |
-                               | HTTP
-                               v
-                    +----------------------+
-                    |      FastAPI         |
-                    |       main.py        |
-                    +----------+-----------+
-                               |
-              +----------------+----------------+
-              |                                 |
-              v                                 v
-     OpenRouter Models API              OpenRouter Chat API
-              |                                 |
-              v                                 v
-     Free model metadata                 Selected model
-     benchmark metadata                  streaming response
-     endpoint statistics
+Azure App Service
+        |
+        v
+FastAPI
+        |
+        v
+OpenRouter
+        |
+        v
+Free LLM endpoints
 ```
 
-The browser stores chat history locally using `localStorage`, so conversations are retained in the browser rather than being stored in a server-side database.
+Azure App Service supports Python web applications including FastAPI and provides the hosting layer for the public Afterworld instance. For supported Python versions, App Service can run FastAPI directly; other versions may require a custom startup command.
 
-Each conversation also retains the selected model, which helps keep model comparisons consistent.
+A typical FastAPI deployment can use:
+
+```bash
+gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 main:app
+```
+
+The exact startup configuration depends on the Python version and App Service configuration.
+
+### IX.II Environment variables
+
+The OpenRouter API key is provided through an environment variable:
+
+```env
+OPENROUTER_API_KEY=your_api_key_here
+```
+
+The key should be stored in Azure App Service configuration for the deployed application and should not be committed to the repository.
+
+### IX.III Local development
+
+Local execution is intended for development and testing.
+
+```bash
+uvicorn main:app --reload
+```
+
+The production application remains hosted through Azure App Service.
 
 ---
 
-# Caching and request control
-
-The backend deliberately avoids refreshing everything on every request.
-
-Current settings include:
+## X. Project Structure
 
 ```text
-Model catalog cache:       10 minutes
-Manual refresh minimum:    60 seconds
-Latency stats cache:       2 minutes
-Latency collection budget: 12 seconds
-Live probe timeout:        12 seconds
-Fast model pool:           3 models
-Probe batch size:          4 models
-Maximum chat history:      20 messages
-Maximum output:            4096 tokens
-```
-
-Caching serves two purposes:
-
-1. It reduces unnecessary requests to OpenRouter.
-2. It prevents the comparison tool itself from wasting a large portion of a small free-tier quota.
-
----
-
-# Chat behavior
-
-CRChatbot uses OpenAI-compatible chat completions through OpenRouter.
-
-Responses are streamed to the browser instead of waiting for the entire answer before displaying anything.
-
-The backend:
-
-1. Receives the selected model and conversation history.
-2. Cleans and limits the history.
-3. Adds the system prompt.
-4. Sends the request to OpenRouter.
-5. Waits for the first output.
-6. Streams the rest of the response to the browser.
-
-The current system prompt is intentionally simple:
-
-```text
-You are a helpful chatbot.
-```
-
-The backend limits the conversation history to the most recent 20 messages before sending it to the model.
-
----
-
-# Project structure
-
-```text
-CRChatbot/
+Afterworld/
 │
 ├── main.py
 ├── static/
@@ -576,238 +374,87 @@ CRChatbot/
 └── README.md
 ```
 
-`main.py` contains the FastAPI application, OpenRouter integration, model catalog processing, latency collection, model selection, retry handling, and chat streaming.
+### `main.py`
 
-`static/index.html` contains the complete web interface, model dashboard, chat interface, browser-side history, filtering, model selection, and streaming display.
+FastAPI backend, OpenRouter integration, model processing, latency checks, model selection, retries, and response streaming.
+
+### `index.html`
+
+Frontend interface, model browser, filters, chat interface, browser-side chat storage, and streamed response rendering.
 
 ---
 
-# Local setup
+## XI. Limitations
 
-## 1. Clone the repository
+The current version is not yet a full LLM benchmarking suite.
 
-```bash
-git clone <your-repository-url>
-cd CRChatbot
-```
+In particular:
 
-## 2. Create a virtual environment
+- External benchmark scores are displayed rather than independently reproduced.
+- The live latency probe is a small response check, not a full speed benchmark.
+- There are no repeated controlled task evaluations yet.
+- Tokens per second is not currently measured.
+- Long term reliability statistics are not yet collected.
+- Browser to Azure end-to-end latency is not separately recorded.
+- Free model availability can change over time.
+- Provider and rate-limit conditions can vary independently of model capability.
 
-Windows:
+These limitations define the next stage of development rather than being hidden by a single overall score.
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
+---
 
-macOS/Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-## 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-A minimal `requirements.txt` for the current code is:
+## XII. Development Roadmap
 
 ```text
-fastapi
-uvicorn
-openai
-python-dotenv
-```
-
-For a production Linux deployment, add:
-
-```text
-gunicorn
-```
-
-## 4. Add your OpenRouter API key
-
-Create a `.env` file:
-
-```env
-OPENROUTER_API_KEY=your_api_key_here
-```
-
-Do not commit this file to GitHub.
-
-Add it to `.gitignore`:
-
-```text
-.env
-.venv/
-__pycache__/
-```
-
-## 5. Start the server
-
-```bash
-uvicorn main:app --reload
-```
-
-The application will normally be available at:
-
-```text
-http://127.0.0.1:8000
+Current
+|
++-- Azure hosted application
++-- OpenRouter integration
++-- Dynamic free model catalog
++-- Model metadata and external benchmark display
++-- Model search and filtering
++-- Fixed-model conversations
++-- Streaming responses
++-- Latency aware random selection
+|
+v
+Next
+|
++-- Controlled benchmark prompts
++-- Repeated trials
++-- TTFT and generation speed
++-- Reliability statistics
++-- Rate-limit experiments
++-- Cloud region comparison
++-- Result storage
++-- Benchmark visualisation
+|
+v
+Later
+|
++-- Category based model comparison
++-- Historical performance tracking
++-- Automated benchmark runs
++-- Reproducible cloud benchmarking
 ```
 
 ---
 
-# Azure App Service
+## XIII. References
 
-The FastAPI application can also be hosted on Azure App Service.
+1. [OpenRouter API Documentation](https://openrouter.ai/docs)
+   Model catalog, model metadata, API usage, pricing, and endpoints.
 
-For Linux App Service deployments, Microsoft's current documentation supports FastAPI and provides a Gunicorn configuration using Uvicorn workers. A typical startup command is:
+2. [Artificial Analysis Intelligence Index](https://artificialanalysis.ai/evaluations/artificial-analysis-intelligence-index)
+   Benchmark methodology and Intelligence Index information.
 
-```bash
-gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 main:app
-```
-
-The exact startup configuration depends on the Python version and App Service environment.
-
-The API key should be added through the App Service environment settings rather than committing `.env` to the repository.
-
-The important point for benchmarking is that **the cloud region becomes part of the experimental setup**.
-
-A latency result from one Azure region should not automatically be treated as a universal latency result for every user.
+3. [Microsoft Azure App Service Documentation](https://learn.microsoft.com/en-us/azure/app-service/)
+   Documentation for hosting Python web applications and FastAPI applications on Azure App Service.
 
 ---
 
-# Important limitations
+## XIV. Project Status
 
-This project intentionally has several limitations.
+**Afterworld is an active project focused on building a practical evaluation platform for free LLMs under cloud hosted and rate limited conditions.**
 
-### Benchmark scores are external
-
-The Artificial Analysis score is obtained through OpenRouter. CRChatbot does not independently reproduce that benchmark.
-
-### Latency is time dependent
-
-Free endpoint latency can change with provider load, traffic, routing, and time of day.
-
-### Provider behavior matters
-
-Two requests using the same model may not behave identically if they reach different providers or endpoints.
-
-### Free availability changes
-
-Models can enter or leave the free pool. A model shown today may not be available later.
-
-### Live probes are small
-
-The `"Say hi."` probe is useful for checking whether an endpoint is responding and for measuring time to first output, but it is not a substitute for a full workload benchmark.
-
-### Browser latency is not currently measured
-
-The current latency measurement happens on the backend. A user in another country can experience additional network delay.
-
-### One benchmark score cannot describe every task
-
-Artificial Analysis itself notes that its Intelligence Index has limitations and that specific evaluations can be more relevant to particular use cases. [3][4]
-
----
-
-# Future work
-
-The next logical step is to turn the live comparison layer into a full benchmarking system.
-
-Possible additions include:
-
-```text
-[ ] Controlled prompt benchmark suite
-[ ] Automated repeated trials
-[ ] TTFT measurement
-[ ] Full response latency
-[ ] Tokens per second
-[ ] Success rate
-[ ] 429 / rate-limit frequency
-[ ] Timeout frequency
-[ ] Quality scoring
-[ ] Export results to CSV
-[ ] Historical model performance
-[ ] Region-to-region cloud comparison
-[ ] Provider-level comparison
-[ ] Automated category selection
-[ ] Confidence intervals
-[ ] Benchmark result charts
-```
-
-A particularly useful extension would be a test matrix such as:
-
-```text
-                    Quality   TTFT   Speed   Reliability   Context
-Model A               82       0.8     70        96%          128K
-Model B               79       0.4    120        88%          256K
-Model C               85       1.2     65        99%          128K
-```
-
-The result would not be one universal ranking.
-
-Instead, the system could identify which models are strongest for each measured category and show the tradeoffs clearly.
-
----
-
-# Why this project matters
-
-The LLM ecosystem is increasingly full of models that look similar when viewed through a simple leaderboard.
-
-Real applications are messier.
-
-A model has to deal with an API, a provider, a network path, rate limits, changing availability, and the workload itself.
-
-That is especially true when the goal is to build something for $0 or close to it.
-
-CRChatbot is an attempt to evaluate that practical layer rather than treating a benchmark number as the whole story.
-
-The long-term idea is simple:
-
-> **Do not just ask how capable a model is. Ask how capable, fast, available, and usable it is under the conditions in which the application will actually run.**
-
----
-
-# References
-
-**[1] OpenRouter, List all models and their properties**  
-Official API documentation for model metadata, architecture, context length, pricing, and supported capabilities.
-
-**[2] OpenRouter, Pricing and Free Models documentation**  
-Current information on free model availability and free-tier request limits.
-
-**[3] Artificial Analysis, Intelligence Benchmarking Methodology**  
-Methodology and limitations of the Artificial Analysis Intelligence Index.
-
-**[4] Artificial Analysis, Model Comparison**  
-Definitions and comparisons for intelligence, latency, speed, context, cost, and other model metrics.
-
-**[5] OpenRouter, Quickstart and API documentation**  
-OpenAI-compatible API usage and streaming behavior.
-
-**[6] Microsoft Learn, Azure App Service Python / FastAPI documentation**  
-Deployment and startup configuration for Python FastAPI applications on Azure App Service.
-
----
-
-## License
-
-Add the license you intend to use here.
-
-For example:
-
-```text
-MIT License
-```
-
----
-
-## Version
-
-```text
-CRChatbot v1.0.4
-```
+The current release establishes the application and deployment infrastructure. Future releases will add the controlled benchmarking and measurement layer required for systematic model comparisons.
