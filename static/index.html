@@ -866,7 +866,7 @@
 
                 <section class="hero">
                     <div class="hero-main">
-                        <p class="hero-kicker">Version 1.0.4</p>
+                        <p class="hero-kicker" id="version-kicker">Version 1.1.0</p>
                         <h1 class="wordmark">
                             <svg class="wm-mark" aria-hidden="true"><use href="#mark"/></svg>
                             <span>Afterworld</span>
@@ -1034,7 +1034,7 @@ const MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CONTEXT_IMAGES = 6;
 const LIVE_REFRESH_MS = 60000;
-const DEFAULT_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000 };
+const DEFAULT_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000, credits_threshold: 10 };
 const SIZE_SOURCES = {
     id: "Stated in the model's id",
     weights: "Stated in the model's Hugging Face repository name",
@@ -1849,16 +1849,37 @@ function fillLatency(cell, id) {
     }
 }
 
+function currentLimits() {
+    return live.limits || (catalog && catalog.limits) || DEFAULT_LIMITS;
+}
+
+// OpenRouter's published free-tier criteria, worded exactly as OpenRouter states it: a per-minute
+// cap, and a per-day cap that steps up once $10 of credits have ever been bought. It's one account-wide
+// rule, so this is the same text on every model row, in the Live status panel and in error messages.
+function limitsCriteria(limits) {
+    return limits.per_minute + " requests/minute · " + limits.per_day + " requests/day (" +
+        limits.per_day_with_credits.toLocaleString("en-US") + "/day after buying $" + limits.credits_threshold + "+ of credits, one-time) · shared across every free model, not per model";
+}
+
 function fillLimit(cell, id) {
     if (!cell) return;
     cell.textContent = "";
 
-    const limits = live.limits || DEFAULT_LIMITS;
-    cell.appendChild(el("span", "v", limits.per_minute + " / min"));
+    const limits = currentLimits();
+    const criteria = limitsCriteria(limits);
+
+    const value = el("span", "v", limits.per_minute + " / min");
+    value.title = criteria;
+    cell.appendChild(value);
+
+    const daily = el("span", "s", limits.per_day + "/day, " + limits.per_day_with_credits.toLocaleString("en-US") + " after $" + limits.credits_threshold);
+    daily.title = criteria;
+    cell.appendChild(daily);
 
     const info = live.models[id];
     let text = "No data";
     let tone = "";
+    let title = "Whether this specific model has recently been rate limited by its own provider.";
 
     if (!info) {
         text = live.state === "error" ? "Status unavailable" : "Checking…";
@@ -1874,6 +1895,7 @@ function fillLimit(cell, id) {
     }
 
     const status = el("span", "s");
+    status.title = title;
     status.appendChild(el("i", "dot" + (tone ? " " + tone : "")));
     status.appendChild(document.createTextNode(text));
     cell.appendChild(status);
@@ -1967,6 +1989,13 @@ function renderMeta() {
     const shown = filteredModels().length;
     const total = catalog.count;
     dashMeta.appendChild(el("span", "", shown === total ? total + " free models" : shown + " of " + total + " free models"));
+
+    if (catalog.excluded_agent_only) {
+        const hidden = el("span", "", catalog.excluded_agent_only + " hidden (agent tools only)");
+        hidden.title = "These free models only answer when called from inside an agentic tool, such as a coding agent, and return an error on a normal chat request. Afterworld checks for this automatically and hides them.";
+        dashMeta.appendChild(hidden);
+    }
+
     dashMeta.appendChild(el("span", "", "Updated " + timeAgo(catalog.fetched_at)));
 
     const refresh = el("button", "link-btn", catalogState === "loading" ? "Refreshing…" : "Refresh");
@@ -2022,7 +2051,7 @@ function renderDashboard() {
     ["Model", "Context", "Size", "Latency", "Rate limit", "Features", ""].forEach((label) => {
         head.appendChild(el("span", "", label));
     });
-    head.children[4].title = "Every free model shares one account-wide limit";
+    head.children[4].title = limitsCriteria(currentLimits());
     list.appendChild(head);
 
     for (const entry of groups) {
@@ -2111,9 +2140,9 @@ document.getElementById("jump-models").addEventListener("click", () => {
    ========================================================== */
 
 function updateLivePanel() {
-    const limits = live.limits || DEFAULT_LIMITS;
+    const limits = currentLimits();
     liveMinOf.textContent = "of " + limits.per_minute;
-    liveDayOf.textContent = "of " + limits.per_day + ", or " + limits.per_day_with_credits.toLocaleString("en-US") + " after buying $10+ of credits";
+    liveDayOf.textContent = "of " + limits.per_day + ", or " + limits.per_day_with_credits.toLocaleString("en-US") + " after buying $" + limits.credits_threshold + "+ of credits";
 
     if (live.state !== "ready") {
         liveDot.classList.remove("on");
@@ -2499,6 +2528,17 @@ function clearPending() {
     updateSendState();
 }
 
+// Used when moving to another chat or model: nothing typed or attached carries over
+function resetComposer() {
+    input.value = "";
+    autosize();
+    clearPending();
+
+    clearTimeout(hintTimer);
+    hintBox.textContent = HINT_DEFAULT;
+    hintBox.classList.remove("warn");
+}
+
 async function addFiles(fileList) {
     if (!modelAcceptsImages()) {
         flashHint("This model doesn't accept images.");
@@ -2572,7 +2612,7 @@ function stopStreaming() {
 function openDashboard() {
     closeDrawer();
     stopStreaming();
-    clearPending();
+    resetComposer();
 
     activeId = null;
     draft = null;
@@ -2593,7 +2633,7 @@ function openDashboard() {
 function startDraft(model, origin, note) {
     closeDrawer();
     stopStreaming();
-    clearPending();
+    resetComposer();
 
     activeId = null;
     saveActive();
@@ -2622,7 +2662,7 @@ function openChat(id) {
     if (!convo) return;
 
     stopStreaming();
-    clearPending();
+    resetComposer();
     activeId = id;
     draft = null;
     saveActive();
