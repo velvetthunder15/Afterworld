@@ -69,6 +69,7 @@ PROBE_BATCH = 4           # models tested at the same time when there are no lat
 THROTTLE_WINDOW = 600     # a model counts as rate limited for this long after a 429
 MEASURED_FRESH = 300      # a live measurement newer than this is shown instead of OpenRouter's median
 MEASURED_MAX_AGE = 1800   # live measurements are dropped after this long
+AGENT_ONLY_TTL = 86400    # how long a model found to be "agent tools only" stays hidden before being re-checked
 
 # Free-model limits from OpenRouter's documentation. They apply to the whole account,
 # not to each model, and buying credits does not change the per-minute limit.
@@ -78,6 +79,8 @@ FREE_LIMITS = {
     "per_day_with_credits": 1000,
     "credits_threshold": 10,
 }
+
+APP_VERSION = "1.1.0"
 
 SYSTEM_PROMPT = "You are a helpful chatbot."
 MAX_TOKENS_CAP = 4096     # longest reply we ask for (lower if the model's own limit is lower)
@@ -94,6 +97,23 @@ MAX_ATTEMPTS = 3
 
 # Routers pick a different model each time, which is not what a fixed chat needs
 ROUTER_IDS = {"openrouter/free", "openrouter/auto", "openrouter/bodybuilder"}
+
+# Some free models answer a plain chat request with 403: they only work when called
+# from inside an agentic tool (a coding agent, etc.), not from a normal chat request.
+# Thinking Machines' Inkling models are the known case at the time of writing, so they
+# are hidden from the start rather than waiting for someone to hit the error first.
+# Anything else that turns out to behave the same way is detected and hidden automatically
+# (see mark_agent_only below), and re-checked after AGENT_ONLY_TTL in case it is fixed.
+KNOWN_AGENT_ONLY_IDS = {
+    "thinkingmachines/inkling:free",
+    "thinkingmachines/inkling-small:free",
+}
+AGENT_ONLY_HINTS = (
+    "agentic harness",
+    "agentic harnesses",
+    "only available on",
+    "coding agent or productivity app",
+)
 
 # Free models that are not general chat models (guardrails and similar)
 NON_CHAT_HINTS = (
@@ -568,6 +588,7 @@ _stats_lock = threading.Lock()
 _observed = {}       # model id -> what this server has seen itself: last measured speed, last 429
 _stat_urls = {}      # model id -> the endpoints URL that worked last time
 _requests = deque()  # when this server sent requests to free models (for the usage counter)
+_agent_only = {}     # model id -> {"reason": str, "at": timestamp} for models that need an agentic tool
 
 
 def fetch_json(url, timeout=15, auth=False):
@@ -611,8 +632,9 @@ def load_catalog(force=False):
 
 
 def list_models():
+    hidden = agent_only_ids()
     with _lock:
-        return list(_state["models"])
+        return [model for model in _state["models"] if model["id"] not in hidden]
 
 
 def find_model(model_id):
@@ -755,6 +777,49 @@ def record_throttle(model_id):
         _observed.setdefault(model_id, {})["throttled_at"] = time.time()
 
 
+def is_upstream_limit(message):
+    """True for a 429 from the model's own provider; False for our OpenRouter account limit."""
+    text = (message or "").lower()
+    return "upstream" in text or "rate-limited" in text
+
+
+def is_agent_only(message):
+    text = (message or "").lower()
+    return any(hint in text for hint in AGENT_ONLY_HINTS)
+
+
+def mark_agent_only(model_id, reason):
+    with _lock:
+        _agent_only[model_id] = {"reason": reason, "at": time.time()}
+    print("[Afterworld] %s looks like it only works inside an agentic tool, hiding it: %s"
+          % (model_id, reason))
+
+
+def agent_only_ids():
+    """Ids currently hidden for being agent-tool-only, dropping entries old enough to re-check."""
+    now = time.time()
+    with _lock:
+        stale = [mid for mid, info in _agent_only.items() if now - info["at"] > AGENT_ONLY_TTL]
+        for mid in stale:
+            del _agent_only[mid]
+        return set(_agent_only)
+
+
+def agent_only_reason(model_id):
+    with _lock:
+        info = _agent_only.get(model_id)
+        return info["reason"] if info else None
+
+
+def seed_known_agent_only():
+    for model_id in KNOWN_AGENT_ONLY_IDS:
+        with _lock:
+            _agent_only.setdefault(model_id, {"reason": "Known to only work inside an agentic tool.", "at": time.time()})
+
+
+seed_known_agent_only()
+
+
 def usage_snapshot(now=None):
     now = now or time.time()
     midnight = now - (now % 86400)   # start of the current UTC day
@@ -841,12 +906,17 @@ def probe_model(model_id):
 
     except Exception as error:
         status = getattr(error, "status_code", None)
+        upstream_message = getattr(error, "message", "") or str(error)
         print("[Afterworld] probe of %s failed (%s): %s"
-              % (model_id, status or type(error).__name__, getattr(error, "message", error)))
+              % (model_id, status or type(error).__name__, upstream_message))
 
         if status == 429:
             record_throttle(model_id)
-            return {"ok": False, "throttled": True}
+            return {"ok": False, "throttled": True, "upstream": is_upstream_limit(upstream_message)}
+
+        if status == 403 and is_agent_only(upstream_message):
+            mark_agent_only(model_id, upstream_message)
+            return {"ok": False, "agent_only": True}
 
         return {"ok": False}
 
@@ -939,10 +1009,12 @@ def api_models(refresh: int = 0):
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error))
 
-    models = list_models()
-
+    hidden = agent_only_ids()
     with _lock:
         fetched_at = _state["fetched_at"]
+        all_ids = {model["id"] for model in _state["models"]}
+
+    models = list_models()
 
     return {
         "models": [public_model(model) for model in models],
@@ -950,6 +1022,9 @@ def api_models(refresh: int = 0):
         "count": len(models),
         "fetched_at": datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat(),
         "source": MODELS_URL,
+        "version": APP_VERSION,
+        "excluded_agent_only": len(hidden & all_ids),
+        "limits": dict(FREE_LIMITS),
     }
 
 
@@ -1009,8 +1084,14 @@ def api_probe(data: ProbeRequest):
 
     if result["ok"]:
         message = "%s answered in %d ms." % (model["name"], result["ms"])
+    elif result.get("agent_only"):
+        message = model["name"] + " only works inside an agentic tool, so it has been removed from the list."
     elif result.get("throttled"):
-        message = model["name"] + " is rate limited right now."
+        message = (
+            (model["name"] + "'s provider is rate limited right now.")
+            if result.get("upstream")
+            else account_limit_sentence()
+        )
     else:
         message = model["name"] + " didn't answer."
 
@@ -1018,6 +1099,7 @@ def api_probe(data: ProbeRequest):
         "ok": result["ok"],
         "ms": result.get("ms"),
         "throttled": bool(result.get("throttled")),
+        "agent_only": bool(result.get("agent_only")),
         "message": message,
     }
 
@@ -1128,15 +1210,37 @@ def check_images(items, model):
             )
 
 
+def account_limit_criteria():
+    """The bare numbers, e.g. '20 requests a minute and 50 a day (1,000 once you've bought $10 of credits)'."""
+    return (
+        "%d requests a minute and %d a day (%s once you've bought $%d of credits)"
+        % (FREE_LIMITS["per_minute"], FREE_LIMITS["per_day"],
+           "{:,} a day".format(FREE_LIMITS["per_day_with_credits"]), FREE_LIMITS["credits_threshold"])
+    )
+
+
+def account_limit_sentence():
+    """A full sentence for when this limit itself is the news, e.g. after hitting it."""
+    return "You've hit OpenRouter's free-tier limit: " + account_limit_criteria() + ". That limit is shared by every free model."
+
+
 def describe_error(error, name="This model"):
     status = getattr(error, "status_code", None)
+    message = getattr(error, "message", "") or str(error)
 
-    if status == 429:
+    if status == 403 and is_agent_only(message):
         return (
-            name + " is rate limited right now (free models share limits). "
-            "Try again in a moment, choose another model, or add your own provider key at "
-            "openrouter.ai/settings/integrations to get your own rate limit."
+            name + " only works inside an agentic tool (like a coding agent), not in a normal "
+            "chat, so it has been removed from the model list. Choose another model."
         )
+    if status == 429:
+        if is_upstream_limit(message):
+            return (
+                name + "'s provider is rate limited right now, separately from your own "
+                "OpenRouter usage. Try again shortly, choose another model, or add your own "
+                "provider key at openrouter.ai/settings/integrations."
+            )
+        return account_limit_sentence() + " Wait a bit, or choose another model."
     if status == 401:
         return "OpenRouter rejected the API key. Check OPENROUTER_API_KEY in your .env file."
     if status == 402:
@@ -1214,12 +1318,17 @@ def open_stream(model, messages):
                 stream.close()
 
             status = getattr(error, "status_code", None)
+            upstream_message = getattr(error, "message", "") or str(error)
             last_message = describe_error(error, model["name"])
             print("[Afterworld] %s failed (%s): %s"
-                  % (model["id"], status or type(error).__name__, getattr(error, "message", error)))
+                  % (model["id"], status or type(error).__name__, upstream_message))
 
             if status == 429:
                 record_throttle(model["id"])
+
+            if status == 403 and is_agent_only(upstream_message):
+                mark_agent_only(model["id"], upstream_message)
+                break
 
             if status in FATAL_STATUSES:
                 break
@@ -1240,6 +1349,14 @@ def open_stream(model, messages):
 
 
 def require_free_model(model_id):
+    reason = agent_only_reason(model_id)
+    if reason:
+        raise HTTPException(
+            status_code=400,
+            detail="That model only works inside an agentic tool, not in a normal chat, so it "
+                   "has been removed from the model list. Choose another model."
+        )
+
     try:
         load_catalog()
     except CatalogError as error:
