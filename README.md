@@ -349,7 +349,11 @@ OPENROUTER_API_KEY=your_api_key_here
 
 The key should be stored in Azure App Service configuration for the deployed application and should not be committed to the repository.
 
-### IX.III Local development
+### IX.III Cloudflare Workers (in testing)
+
+A Cloudflare Workers version of the backend lives in [`cloudflare/`](cloudflare/README.md). It serves the same frontend with Workers Static Assets and keeps every feature. Azure App Service remains the production deployment until the Worker has been tested.
+
+### IX.IV Local development
 
 Local execution is intended for development and testing.
 
