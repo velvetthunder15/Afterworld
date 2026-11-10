@@ -29,7 +29,7 @@ export const HOSTS = {
     keyVar: "GROQ_API_KEY",
     baseVar: "GROQ_BASE_URL",
     free: "Groq free plan",
-    limits: "Groq's free plan: about 30 requests a minute and 1,000 a day per model",
+    limits: "Limits vary by model and account",
   },
   sambanova: {
     label: "SambaNova",
@@ -38,7 +38,7 @@ export const HOSTS = {
     keyVar: "SAMBANOVA_API_KEY",
     baseVar: "SAMBANOVA_BASE_URL",
     free: "SambaNova free tier",
-    limits: "SambaNova's free tier: about 20 requests a minute and 20 a day per model",
+    limits: "Limits vary by model and account",
   },
   mistral: {
     label: "Mistral",
@@ -47,7 +47,7 @@ export const HOSTS = {
     keyVar: "MISTRAL_API_KEY",
     baseVar: "MISTRAL_BASE_URL",
     free: "Mistral free plan (monthly credit)",
-    limits: "Mistral's free plan: a monthly API credit, with rate limits shown in Mistral's console",
+    limits: "Limits vary by model and account",
   },
   workersai: {
     label: "Workers AI",

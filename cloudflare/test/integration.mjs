@@ -92,7 +92,7 @@ try {
     catalog = await r.json();
     assert.equal(catalog.models.filter((m) => m.host === "openrouter").length, 8);
     assert.ok(!catalog.models.some((m) => m.id === "mock/paid"));
-    assert.equal(catalog.version, "1.1.0");
+    assert.equal(catalog.version, "1.1.1");
     assert.deepEqual(Object.keys(catalog.groupings).sort(), ["context", "host", "input", "provider", "quality", "size"]);
     const ok = catalog.models.find((m) => m.id === "mock/ok");
     assert.equal(ok.params_label, "7B");
@@ -135,6 +135,17 @@ try {
       assert.equal(call.auth, "Bearer " + key);
       assert.equal(call.body.model, raw);
     }
+  });
+
+  await test("GET /api/status separates provider request counts", async () => {
+    const result = await (await fetch(BASE + "/api/status")).json();
+    for (const key of ["groq", "sambanova", "mistral"]) {
+      const provider = result.providers.find((p) => p.key === key);
+      assert.ok(provider.usage.day >= 1, key);
+      assert.equal(provider.scope, "model");
+      assert.equal(provider.limit_per_day, null);
+    }
+    assert.ok(result.updated_at);
   });
 
   await test("other hosts: a model that needs a paid plan is hidden after its 402", async () => {
