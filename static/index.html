@@ -1762,6 +1762,11 @@ function filteredModels() {
     });
 }
 
+function fmtAge(sec) {
+    if (sec < 60) return Math.max(1, Math.round(sec)) + " s";
+    return Math.round(sec / 60) + " min";
+}
+
 function latencyOf(model) {
     const info = live.models[model.id];
     return info && info.latency_ms !== null && info.latency_ms !== undefined ? info.latency_ms : null;
@@ -2161,13 +2166,26 @@ function updateLivePanel() {
     liveDot.classList.add("on");
     updateLiveStamp();
 
-    // Fastest model right now
-    let best = null;
-    for (const [id, info] of Object.entries(live.models)) {
-        if (info.latency_ms === null || info.latency_ms === undefined) continue;
-        if (info.state === "throttled" || info.state === "degraded") continue;
-        if (!best || info.latency_ms < best.ms) best = { id: id, ms: info.latency_ms };
-    }
+    // Fastest model right now. Prefer fresh speeds Afterworld measured itself
+    // (time to first output from this Worker), so every candidate is timed the
+    // same way; OpenRouter's 30-minute medians are a different measure and are
+    // only a fallback. Only models in the current list count.
+    const FRESH_S = 15 * 60;
+    const listed = new Set(catalog ? catalog.models.map((m) => m.id) : []);
+    const pick = (ok) => {
+        let top = null;
+        for (const [id, info] of Object.entries(live.models)) {
+            if (catalog && !listed.has(id)) continue;
+            if (info.latency_ms === null || info.latency_ms === undefined) continue;
+            if (info.state === "throttled" || info.state === "degraded") continue;
+            if (!ok(info)) continue;
+            if (!top || info.latency_ms < top.ms) top = { id: id, ms: info.latency_ms, info: info };
+        }
+        return top;
+    };
+    let best = pick((i) => i.latency_source === "measured" && i.latency_age_s !== null && i.latency_age_s <= FRESH_S);
+    let basis = "measured";
+    if (!best) { best = pick((i) => i.latency_source === "openrouter"); basis = "openrouter"; }
 
     liveFastest.textContent = "";
     if (best) {
@@ -2175,7 +2193,13 @@ function updateLivePanel() {
         const name = el("b", "", found ? found.name : best.id);
         liveFastest.appendChild(name);
         liveFastest.appendChild(document.createTextNode(" "));
-        liveFastest.appendChild(el("span", "muted", fmtMs(best.ms)));
+        const note = basis === "measured"
+            ? fmtMs(best.ms) + " to first output, measured " + fmtAge(best.info.latency_age_s) + " ago"
+            : fmtMs(best.ms) + ", OpenRouter's 30-min median";
+        liveFastest.appendChild(el("span", "muted", note));
+        liveFastest.title = basis === "measured"
+            ? "Fastest of the models Afterworld timed in the last 15 minutes, all measured the same way"
+            : "No fresh measurements yet, so this uses OpenRouter's median, which is a different measure";
     } else {
         liveFastest.textContent = "No latency data yet";
     }
