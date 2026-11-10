@@ -2,7 +2,20 @@
 // functions, so these check that the Worker labels models exactly as the Azure app does.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sizeFromDescription, sizeFromIdentifier, formatTokens, formatParams, normalizeModels, isFree, isExpired } from "../src/catalog.js";
+import { sizeFromDescription, sizeFromIdentifier, formatTokens, formatParams, normalizeModels, isFree, isExpired, isChatModel } from "../src/catalog.js";
+import { parseWorkersAiModels } from "../src/providers.js";
+
+test("excludes structured decision models from chat while retaining normal Workers AI models", () => {
+  const names = ["@cf/cloudflare/clairic", "@cf/cloudflare/clef", "@cf/cloudflare/clef-omni", "@cf/cloudflare/clef-flash", "@cf/meta/llama-3.1-8b-instruct"];
+  const list = names.map((name) => ({ name, task: { name: "Text Generation" }, properties: [] }));
+  assert.deepEqual(parseWorkersAiModels(list).map((m) => m.id), ["workersai::@cf/meta/llama-3.1-8b-instruct"]);
+});
+
+test("excludes music generation models even when catalog metadata says text", () => {
+  const model = { id: "google/lyria-3-pro-preview", architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["max_tokens"] };
+  assert.equal(isChatModel(model), false);
+  assert.equal(isChatModel({ ...model, id: "google/gemma-4" }), true);
+});
 
 const CASES = {
   "desc": [
