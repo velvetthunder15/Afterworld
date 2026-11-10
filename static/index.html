@@ -909,7 +909,7 @@
                                 <dd><b id="live-day">…</b> <span class="muted" id="live-day-of">of 50, or 1,000 after buying $10+ of credits</span></dd>
                             </div>
                         </dl>
-                        <p class="live-foot">One limit covers every free model, because it applies to your OpenRouter account and not to each model. Counts include only requests sent through Afterworld.</p>
+                        <p class="live-foot">This limit covers every OpenRouter free model, because it applies to your OpenRouter account and not to each model. Models via Groq, SambaNova, Mistral or Workers AI have their own limits. Counts include only requests sent through Afterworld.</p>
                     </aside>
                 </section>
 
@@ -927,6 +927,7 @@
                             <button type="button" data-group="quality">Benchmark</button>
                             <button type="button" data-group="input">Input</button>
                             <button type="button" data-group="provider">Provider</button>
+                            <button type="button" data-group="host">Host</button>
                         </div>
                     </div>
 
@@ -1027,7 +1028,7 @@ const NETWORK_ERROR = "Couldn't reach the server. Check that main.py is running,
 const KEYS = { chats: "afterworld.chats.v1", active: "afterworld.active.v1", group: "afterworld.groupby.v1", sort: "afterworld.sort.v1" };
 const LEGACY_KEYS = { chats: "crchatbot.chats.v2", active: "crchatbot.active.v2", group: "crchatbot.groupby.v1" };
 const MAX_CHATS = 100;
-const GROUP_KEYS = ["context", "size", "quality", "input", "provider"];
+const GROUP_KEYS = ["context", "size", "quality", "input", "provider", "host"];
 const SORT_KEYS = ["context", "latency", "name"];
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 const MAX_IMAGES_PER_MESSAGE = 4;
@@ -1787,12 +1788,14 @@ function sortItems(items) {
 
 function visibleGroups() {
     const models = filteredModels();
-    const config = catalog.groupings[dash.group];
+    // The Azure backend has no "host" grouping; fall back to context there
+    const key = catalog.groupings[dash.group] ? dash.group : "context";
+    const config = catalog.groupings[key];
 
     return config.groups
         .map((group) => ({
             group: group,
-            items: sortItems(models.filter((m) => m.tiers[dash.group] === group.key))
+            items: sortItems(models.filter((m) => m.tiers[key] === group.key))
         }))
         .filter((entry) => entry.items.length);
 }
@@ -1914,7 +1917,7 @@ function modelRow(m) {
     const text = el("div", "model-text");
     text.appendChild(el("span", "model-name", m.name));
     const sub = el("div", "model-desc");
-    sub.appendChild(el("span", "prov", m.provider));
+    sub.appendChild(el("span", "prov", m.host && m.host !== "openrouter" ? m.provider + " via " + m.host_label : m.provider));
     if (m.description) sub.appendChild(document.createTextNode(" · " + m.description));
     text.appendChild(sub);
     model.appendChild(text);

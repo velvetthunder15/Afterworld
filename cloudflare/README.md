@@ -108,3 +108,16 @@ The existing `azure-deploy.yml` is unchanged. A Cloudflare job would run
 `npx wrangler deploy` in `cloudflare/` with a `CLOUDFLARE_API_TOKEN` repository secret
 (Workers Scripts: Edit permission). It is left out on purpose, so pushing to `main`
 can't deploy the Worker before you've tested it.
+
+## Other hosts (optional)
+
+Besides OpenRouter, the Worker can list and chat with models from:
+
+| Host | How to turn it on | Free allowance |
+|---|---|---|
+| Cloudflare Workers AI | On by default through the `AI` binding in `wrangler.jsonc`. Set the var `WORKERS_AI_ENABLED` to `false` to hide it. | 10,000 Neurons a day, shared by every Workers AI model |
+| Groq | `npx wrangler secret put GROQ_API_KEY` | About 30 requests a minute and 1,000 a day per model |
+| SambaNova | `npx wrangler secret put SAMBANOVA_API_KEY` | Free tier; new accounts may need a payment method on file |
+| Mistral | `npx wrangler secret put MISTRAL_API_KEY` | Off unless a key is set |
+
+A host without a key is left out. Its model ids look like `groq::openai/gpt-oss-120b`, so they never clash with OpenRouter ids. When a host answers that a model needs a paid plan (HTTP 402, or Workers AI's "not available on the Workers Free plan"), the model is hidden from the list, the same way agent-only models are. The page has a new "Host" grouping and shows "via Groq" and similar under each model.
