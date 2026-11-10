@@ -226,6 +226,8 @@ export function isExpired(entry, today) {
 export function isChatModel(entry) {
   const modelId = entry.id || "";
   if (!modelId || modelId.startsWith("~") || ROUTER_IDS.has(modelId)) return false;
+  // Lyria generates music rather than text chat, even when catalog metadata says text output.
+  if (/^google\/lyria[-/]/i.test(modelId)) return false;
   if (entry.alias_target) return false;
 
   const architecture = entry.architecture || {};

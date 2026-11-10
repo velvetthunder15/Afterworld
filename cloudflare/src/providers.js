@@ -286,6 +286,8 @@ export function parseWorkersAiModels(list, today = new Date().toISOString().slic
   const models = [];
   for (const m of list || []) {
     if (!m || typeof m.name !== "string") continue;
+    // These decision and prediction models need structured inputs, not chat messages.
+    if (/^@cf\/cloudflare\/(?:clairic|clef(?:-omni|-flash)?)$/i.test(m.name)) continue;
     const task = (m.task && (m.task.name || m.task.id)) || "";
     if (task && task !== "Text Generation") continue;
     const props = {};
