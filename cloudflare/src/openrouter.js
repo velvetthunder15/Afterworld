@@ -165,7 +165,10 @@ export async function createChatStream(env, { model, messages, maxTokens, timeou
     }
     // Same shape as the openai SDK's message, so the text checks in main.py still apply
     const message = "Error code: " + response.status + (detail ? " - " + detail : "") + (inner && !detail.includes(inner) ? " " + inner : "");
-    throw new ApiError("status", message, response.status);
+    const error = new ApiError("status", message, response.status);
+    const retry = response.headers.get("retry-after");
+    if (retry) { const seconds = Number(retry); error.retryAfter = Number.isFinite(seconds) ? Math.max(0, Math.ceil(seconds)) : Math.max(0, Math.ceil((Date.parse(retry) - Date.now()) / 1000)) || null; }
+    throw error;
   }
 
   const chunks = sseChunks(response.body, timeoutMs);

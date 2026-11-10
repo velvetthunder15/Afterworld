@@ -798,6 +798,19 @@
             .msg { gap: 10px; }
             #welcome { padding-top: 3vh; }
         }
+        .hero { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 24px 0; }
+    .wordmark { font-size: clamp(32px, 6vw, 48px); }
+    .hero-lede { margin-top: 8px; font-size: 16px; }
+    .hero-actions { margin-top: 16px; }
+    .live { width: 100%; }
+    .live-list[hidden] { display: none; }
+    .provider-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .provider-row small { grid-column: 1 / -1; color: var(--muted); }
+    .provider-meter { grid-column: 1 / -1; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
+    .provider-meter i { display: block; height: 100%; }
+    .status-info { min-width: 44px; min-height: 44px; color: var(--text); background: none; border: 0; cursor: pointer; }
+    .side-foot span { display: block; margin-top: 8px; }
+    #input-area { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
     </style>
 </head>
 
@@ -830,7 +843,7 @@
         </button>
     </div>
 
-    <button class="btn label-hide" id="dash-btn" type="button" aria-label="Open the model dashboard">
+    <button class="btn label-hide" id="dash-btn" type="button" aria-label="Models">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg>
         <span>Models</span>
     </button>
@@ -853,7 +866,7 @@
             <p class="chat-empty" id="chat-empty">No chats yet. Pick a model to start one.</p>
         </nav>
 
-        <div class="side-foot">Chats are saved in this browser.</div>
+        <div class="side-foot">Chats are saved in this browser. <span id="version-kicker">Version 1.1.1</span></div>
     </aside>
 
     <div class="scrim" id="scrim" hidden></div>
@@ -866,13 +879,12 @@
 
                 <section class="hero">
                     <div class="hero-main">
-                        <p class="hero-kicker" id="version-kicker">Version 1.1.0</p>
+                        
                         <h1 class="wordmark">
-                            <svg class="wm-mark" aria-hidden="true"><use href="#mark"/></svg>
-                            <span>Afterworld</span>
+                            <span>Choose your AI</span>
                         </h1>
                         <p class="hero-lede">Free AI models, all in one place.</p>
-                        <p class="hero-sub">Pick a model to start a chat, or let Afterworld choose one of the fastest models that is answering right now.</p>
+                        
 
                         <div class="hero-actions">
                             <button class="btn btn-primary btn-lg" id="random-btn" type="button">
@@ -894,7 +906,7 @@
                             <h2>Live status</h2>
                             <span class="live-stamp" id="live-stamp">Loading…</span>
                         </div>
-                        <dl class="live-list">
+                        <div id="provider-status" aria-live="polite">Loading providers…</div><dl class="live-list" hidden>
                             <div>
                                 <dt>Fastest right now</dt>
                                 <dd id="live-fastest">…</dd>
@@ -906,10 +918,10 @@
                             </div>
                             <div>
                                 <dt>Requests today (UTC)</dt>
-                                <dd><b id="live-day">…</b> <span class="muted" id="live-day-of">of 50, or 1,000 after buying $10+ of credits</span></dd>
+                                <dd><b id="live-day">…</b> <span class="muted" id="live-day-of">of 50</span></dd>
                             </div>
                         </dl>
-                        <p class="live-foot">This limit covers every OpenRouter free model, because it applies to your OpenRouter account and not to each model. Models via Groq, SambaNova, Mistral or Workers AI have their own limits. Counts include only requests sent through Afterworld.</p>
+                        <button class="status-info" type="button" aria-label="Counts only requests sent through Afterworld. OpenRouter’s limit is shared across all its free models." title="Counts only requests sent through Afterworld. OpenRouter’s limit is shared across all its free models.">ⓘ</button>
                     </aside>
                 </section>
 
@@ -952,11 +964,7 @@
 
                 <div id="dash-body"></div>
 
-                <p class="fine">
-                    Free models are rate limited by OpenRouter and by their providers, and some providers may log or train on prompts, so avoid sharing sensitive information.
-                    Context windows, output limits, abilities and benchmark scores come from the OpenRouter API (benchmarks by Artificial Analysis).
-                    Latency is OpenRouter's 30-minute median where it is available, or a speed measured by Afterworld. OpenRouter does not publish parameter counts, so sizes appear only when a model states them.
-                </p>
+
             </div>
         </section>
 
@@ -1095,6 +1103,7 @@ const lightboxImg = lightbox.querySelector("img");
 
 class ApiError extends Error {}
 
+let providerStatus = [];
 let busy = false;
 let controller = null;
 let view = "dashboard";
@@ -1865,24 +1874,20 @@ function currentLimits() {
 // cap, and a per-day cap that steps up once $10 of credits have ever been bought. It's one account-wide
 // rule, so this is the same text on every model row, in the Live status panel and in error messages.
 function limitsCriteria(limits) {
-    return limits.per_minute + " requests/minute · " + limits.per_day + " requests/day (" +
-        limits.per_day_with_credits.toLocaleString("en-US") + "/day after buying $" + limits.credits_threshold + "+ of credits, one-time) · shared across every free model, not per model";
+    return limits.per_minute + " requests/minute · " + limits.per_day + " requests/day · shared across OpenRouter free models";
 }
 
 function fillLimit(cell, id) {
     if (!cell) return;
     cell.textContent = "";
 
-    const limits = currentLimits();
-    const criteria = limitsCriteria(limits);
-
-    const value = el("span", "v", limits.per_minute + " / min");
-    value.title = criteria;
-    cell.appendChild(value);
-
-    const daily = el("span", "s", limits.per_day + "/day, " + limits.per_day_with_credits.toLocaleString("en-US") + " after $" + limits.credits_threshold);
-    daily.title = criteria;
-    cell.appendChild(daily);
+    const model = catalog && catalog.models.find((m) => m.id === id);
+    const host = model?.host || "openrouter";
+    const provider = providerStatus.find((p) => p.key === host);
+    const counts = provider?.scope === "model" ? provider.models[id] : provider?.usage;
+    cell.appendChild(el("span", "v", provider?.name || host));
+    cell.appendChild(el("span", "s", counts ? counts.minute + " / min · " + counts.day + " today" : "No requests recorded"));
+    cell.appendChild(el("span", "s", "Limit not published"));
 
     const info = live.models[id];
     let text = "No data";
@@ -2150,7 +2155,7 @@ document.getElementById("jump-models").addEventListener("click", () => {
 function updateLivePanel() {
     const limits = currentLimits();
     liveMinOf.textContent = "of " + limits.per_minute;
-    liveDayOf.textContent = "of " + limits.per_day + ", or " + limits.per_day_with_credits.toLocaleString("en-US") + " after buying $" + limits.credits_threshold + "+ of credits";
+    liveDayOf.textContent = "of " + limits.per_day;
 
     if (live.state !== "ready") {
         liveDot.classList.remove("on");
@@ -2231,6 +2236,27 @@ function updateLive() {
     }
 }
 
+function renderProviderStatus() {
+    const box = document.getElementById("provider-status");
+    box.textContent = "";
+    for (const p of providerStatus) {
+        const row = el("div", "provider-row");
+        row.appendChild(el("b", "", p.name));
+        row.appendChild(el("span", "", p.usage.minute + " this minute · " + p.usage.day + " today"));
+        row.appendChild(el("small", "", p.scope === "model" ? "Limits vary by model" : (p.limit_per_min ? p.limit_per_min + "/min for :free models · daily limit unknown" : "Limit not published")));
+        if (p.scope === "account" && p.limit_per_min) {
+            const bar = el("div", "provider-meter");
+            const fill = el("i", "");
+            const ratio = p.usage.free_minute / p.limit_per_min;
+            fill.style.width = Math.min(100, ratio * 100) + "%";
+            fill.style.background = ratio >= 1 ? "#ff7272" : ratio > .7 ? "#ffc267" : "#63d8a2";
+            bar.appendChild(fill); row.appendChild(bar);
+        }
+        box.appendChild(row);
+    }
+    if (!providerStatus.length) box.textContent = "Provider status unavailable";
+}
+
 async function loadLive() {
     if (live.loading) return;
     live.loading = true;
@@ -2241,6 +2267,8 @@ async function loadLive() {
 
         const data = await res.json();
         live.models = data.models || {};
+        try { const status = await fetch("/api/status", { cache: "no-store" }); if (status.ok) providerStatus = (await status.json()).providers || []; } catch (_) {}
+        renderProviderStatus();
         live.usage = data.usage || null;
         live.limits = data.limits || null;
         live.updatedAt = Date.now();

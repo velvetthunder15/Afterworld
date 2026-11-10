@@ -50,7 +50,7 @@ const MEASURED_MAX_AGE = 1800;
 
 const FREE_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000, credits_threshold: 10 };
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 const SYSTEM_PROMPT = "You are a helpful chatbot.";
 const MAX_TOKENS_CAP = 4096;
@@ -117,10 +117,12 @@ class Ctx {
     return this.snap;
   }
 
-  recordRequest() {
+  recordRequest(modelId) {
     const at = now();
-    this.events.push({ type: "request", at });
-    if (this.snap) {
+    const host = modelId.includes("::") ? modelId.split("::")[0] : "openrouter";
+    this.events.push({ type: "request", at, host, model: modelId });
+    if (this.snap) (this.snap.providerRequests ||= []).push({ at, host, model: modelId });
+    if (this.snap && host === "openrouter") {
       this.snap.usage.minute++;
       this.snap.usage.day++;
     }
@@ -424,7 +426,7 @@ function firstOutput(chunk) {
 
 async function probeModel(ctx, modelId) {
   if (!ctx.spend()) return { ok: false };
-  ctx.recordRequest();
+  ctx.recordRequest(modelId);
   const started = performance.now();
   let stream = null;
 
@@ -491,8 +493,7 @@ async function pickRandomFast(ctx) {
 
   const info = (m) => stats[m.id] || { latency: null, healthy: true };
 
-  let healthy = models.filter((m) => info(m).healthy);
-  if (!healthy.length) healthy = models;
+  let healthy = models.filter((m) => info(m).healthy && !atKnownLimit(snap, m));
   const ranked = healthy.filter((m) => info(m).latency !== null).sort((a, b) => info(a).latency - info(b).latency);
 
   const tried = new Set();
@@ -605,15 +606,11 @@ function checkImages(items, model) {
 }
 
 function accountLimitCriteria() {
-  return (
-    FREE_LIMITS.per_minute + " requests a minute and " + FREE_LIMITS.per_day + " a day (" +
-    FREE_LIMITS.per_day_with_credits.toLocaleString("en-US") + " a day once you've bought $" +
-    FREE_LIMITS.credits_threshold + " of credits)"
-  );
+  return "OpenRouter limits vary by account and model";
 }
 
 function accountLimitSentence() {
-  return "You've hit OpenRouter's free-tier limit: " + accountLimitCriteria() + ". That limit is shared by every free model.";
+  return "OpenRouter is rate limited. Retry time unavailable; try again later.";
 }
 
 function describeError(error, name = "This model", host = "openrouter") {
@@ -622,7 +619,7 @@ function describeError(error, name = "This model", host = "openrouter") {
 
   if (host && host !== "openrouter" && HOSTS[host]) {
     const label = HOSTS[host].label;
-    if (status === 429) return name + " hit " + HOSTS[host].limits + ". Wait a bit, or choose another model.";
+    if (status === 429) return label + " is rate limited. " + (error.retryAfter ? "Try again in " + error.retryAfter + " seconds." : "Retry time unavailable. Try again later.");
     if (status === 401 || status === 403) {
       return label + " rejected the request. Check the " + (HOSTS[host].keyVar || "AI binding") + " setting on the Worker.";
     }
@@ -634,27 +631,20 @@ function describeError(error, name = "This model", host = "openrouter") {
     if (status === 404) return name + " isn't available on " + label + " any more. Choose another model.";
     if (error?.kind === "timeout") return name + " took too long to respond. Try again or choose another model.";
     if (error?.kind === "connection") return "Couldn't reach " + label + ". Try again or choose another model.";
-    return "The model request failed: " + message;
+    return "The model request failed. Try again or choose another model.";
   }
 
   if (status === 403 && isAgentOnly(message)) {
     return name + " only works inside an agentic tool (like a coding agent), not in a normal " +
       "chat, so it has been removed from the model list. Choose another model.";
   }
-  if (status === 429) {
-    if (isUpstreamLimit(message)) {
-      return name + "'s provider is rate limited right now, separately from your own " +
-        "OpenRouter usage. Try again shortly, choose another model, or add your own " +
-        "provider key at openrouter.ai/settings/integrations.";
-    }
-    return accountLimitSentence() + " Wait a bit, or choose another model.";
-  }
+  if (status === 429) return "OpenRouter is rate limited. " + (error.retryAfter ? "Try again in " + error.retryAfter + " seconds." : "Retry time unavailable. Try again later.");
   if (status === 401) return "OpenRouter rejected the API key. Check the OPENROUTER_API_KEY secret on the Worker.";
   if (status === 402) return "This OpenRouter account has no credits left for that model.";
   if (status === 404) return name + " isn't available on OpenRouter any more. Choose another model.";
   if (error?.kind === "timeout") return name + " took too long to respond. Try again or choose another model.";
   if (error?.kind === "connection") return "Couldn't reach OpenRouter. Check your internet connection and try again.";
-  return "The model request failed: " + message;
+  return "The model request failed. Try again or choose another model.";
 }
 
 async function firstToken(iterator) {
@@ -681,7 +671,7 @@ async function openStream(ctx, model, messages, signal) {
     attempt++;
     let stream = null;
     ctx.spend();
-    ctx.recordRequest();
+    ctx.recordRequest(model.id);
     const started = performance.now();
 
     try {
@@ -817,6 +807,40 @@ async function apiRandomModel(ctx) {
   }
 }
 
+// Only enforce published limits when they are known for this specific account.
+const PROVIDER_LIMITS = {
+  openrouter: { limit_per_min: 20, limit_per_day: null, scope: "account", source: "https://openrouter.ai/collections/free-models/" },
+  groq: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://console.groq.com/docs/rate-limits" },
+  sambanova: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://docs.sambanova.ai/" },
+  mistral: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://docs.mistral.ai/admin/billing-usage/usage-limits" },
+  workersai: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://developers.cloudflare.com/workers-ai/platform/limits/" },
+};
+function atKnownLimit(snap, model) {
+  const host = model.host || "openrouter";
+  const config = PROVIDER_LIMITS[host];
+  const requests = snap.providerRequests || [];
+  const minute = requests.filter((r) => r.host === host && (host !== "openrouter" || r.model.endsWith(":free")) && (config.scope === "account" || r.model === model.id) && r.at > now() - 60).length;
+  return (config.limit_per_min != null && minute >= config.limit_per_min && (host !== "openrouter" || model.id.endsWith(":free"))) || (snap.observed[model.id]?.throttled_at > now() - 60);
+}
+async function apiStatus(ctx) {
+  await loadCatalog(ctx);
+  const snap = await ctx.load();
+  const models = listModels(snap);
+  const t = now(), midnight = t - (t % 86400);
+  const providers = ["openrouter", ...enabledHosts(ctx.env)].map((key) => {
+    const records = (snap.providerRequests || []).filter((r) => r.host === key);
+    const byModel = {};
+    for (const r of records) {
+      const entry = byModel[r.model] ||= { minute: 0, day: 0 };
+      if (r.at > t - 60) entry.minute++;
+      if (r.at >= midnight) entry.day++;
+    }
+    const fastest = models.filter((m) => (m.host || "openrouter") === key && snap.observed[m.id]?.at > t - MEASURED_MAX_AGE && !atKnownLimit(snap, m)).sort((a,b) => snap.observed[a.id].ms - snap.observed[b.id].ms)[0];
+    return { key, name: hostLabel(key), ...PROVIDER_LIMITS[key], usage: { minute: records.filter((r) => r.at > t - 60).length, day: records.filter((r) => r.at >= midnight).length, free_minute: records.filter((r) => r.model.endsWith(":free") && r.at > t - 60).length }, models: byModel, fastest: fastest ? { id: fastest.id, name: fastest.name, latency_ms: snap.observed[fastest.id].ms } : null };
+  });
+  return json({ providers, updated_at: iso(t) });
+}
+
 async function apiLive(ctx) {
   try {
     await loadCatalog(ctx);
@@ -848,7 +872,7 @@ async function apiProbe(ctx, request) {
     if (result.ok) message = model.name + " answered in " + result.ms + " ms.";
     else if (result.paid) message = model.name + " needs a paid plan on " + model.host_label + ", so it has been removed from the list.";
     else if (result.agent_only) message = model.name + " only works inside an agentic tool, so it has been removed from the list.";
-    else if (result.throttled && model.host && model.host !== "openrouter") message = model.name + " hit " + HOSTS[model.host].limits + ".";
+    else if (result.throttled && model.host && model.host !== "openrouter") message = model.host_label + " is rate limited. Retry time unavailable; try again later.";
     else if (result.throttled) message = result.upstream ? model.name + "'s provider is rate limited right now." : accountLimitSentence();
     else message = model.name + " didn't answer.";
 
@@ -936,11 +960,12 @@ async function route(request, env, execCtx) {
   const method = request.method;
 
   if (pathname === "/api/models" && method === "GET") return apiModels(ctx, url);
+  if (pathname === "/api/status" && method === "GET") return apiStatus(ctx);
   if (pathname === "/api/live" && method === "GET") return apiLive(ctx);
   if (pathname === "/api/random-model" && method === "POST") return apiRandomModel(ctx);
   if (pathname === "/api/probe" && method === "POST") return apiProbe(ctx, request);
   if (pathname === "/chat" && method === "POST") return chat(ctx, request);
-  if (["/api/models", "/api/live", "/api/random-model", "/api/probe", "/chat"].includes(pathname)) {
+  if (["/api/models", "/api/status", "/api/live", "/api/random-model", "/api/probe", "/chat"].includes(pathname)) {
     return json({ detail: "Method Not Allowed" }, 405);
   }
 

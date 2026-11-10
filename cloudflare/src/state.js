@@ -44,7 +44,7 @@ export class AfterworldState extends DurableObject {
   pruneRequests(now) {
     const cutoff = now - DAY;
     let i = 0;
-    while (i < this.requests.length && this.requests[i] < cutoff) i++;
+    while (i < this.requests.length && (typeof this.requests[i] === "number" ? this.requests[i] : this.requests[i].at) < cutoff) i++;
     if (i) this.requests = this.requests.slice(i);
     return i > 0;
   }
@@ -71,6 +71,7 @@ export class AfterworldState extends DurableObject {
       agentOnly: this.agentOnly,
       statUrls: this.statUrls,
       usage: this.usage(now),
+      providerRequests: this.requests.filter((r) => typeof r === "object"),
     };
   }
 
@@ -80,8 +81,10 @@ export class AfterworldState extends DurableObject {
     let minute = 0;
     let day = 0;
     for (const t of this.requests) {
-      if (t > now - 60) minute++;
-      if (t >= midnight) day++;
+      const at = typeof t === "number" ? t : t.at;
+      if (typeof t !== "number" && t.host !== "openrouter") continue;
+      if (at > now - 60) minute++;
+      if (at >= midnight) day++;
     }
     return { minute, day };
   }
@@ -104,7 +107,7 @@ export class AfterworldState extends DurableObject {
     await this.load();
     for (const event of events || []) {
       if (event.type === "request") {
-        this.requests.push(event.at);
+        this.requests.push({ at: event.at, host: event.host || "openrouter", model: event.model || "" });
       } else if (event.type === "success") {
         const obs = (this.observed[event.id] ||= {});
         obs.ms = event.ms;
@@ -116,7 +119,7 @@ export class AfterworldState extends DurableObject {
         this.agentOnly[event.id] = { reason: event.reason, at: event.at };
       }
     }
-    this.requests.sort((a, b) => a - b);
+    this.requests.sort((a, b) => (typeof a === "number" ? a : a.at) - (typeof b === "number" ? b : b.at));
     this.pruneRequests(Date.now() / 1000);
     await this.ctx.storage.put({ observed: this.observed, requests: this.requests, agentOnly: this.agentOnly });
   }
