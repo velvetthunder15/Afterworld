@@ -638,7 +638,7 @@ function describeError(error, name = "This model", host = "openrouter") {
     return name + " only works inside an agentic tool (like a coding agent), not in a normal " +
       "chat, so it has been removed from the model list. Choose another model.";
   }
-  if (status === 429) return "OpenRouter is rate limited. " + (error.retryAfter ? "Try again in " + error.retryAfter + " seconds." : "Retry time unavailable. Try again later.");
+  if (status === 429) return (isUpstreamLimit(message) ? "The OpenRouter provider is rate limited. " : "OpenRouter is rate limited. ") + (error.retryAfter ? "Try again in " + error.retryAfter + " seconds." : "Retry time unavailable. Try again later.");
   if (status === 401) return "OpenRouter rejected the API key. Check the OPENROUTER_API_KEY secret on the Worker.";
   if (status === 402) return "This OpenRouter account has no credits left for that model.";
   if (status === 404) return name + " isn't available on OpenRouter any more. Choose another model.";

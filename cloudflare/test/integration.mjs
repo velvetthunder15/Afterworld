@@ -13,7 +13,7 @@ const mockUrl = "http://127.0.0.1:" + mock.address().port;
 
 const wrangler = spawn(
   "npx",
-  ["wrangler", "dev", "--port", String(WORKER_PORT), "--ip", "127.0.0.1", "--persist-to", "/tmp/afterworld-test-state-" + Date.now(),
+  ["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(WORKER_PORT), "--ip", "127.0.0.1", "--persist-to", "/tmp/afterworld-test-state-" + Date.now(),
    "--var", "OPENROUTER_BASE_URL:" + mockUrl, "--var", "OPENROUTER_API_KEY:test-key", "--var", "WORKERS_AI_ENABLED:false",
    "--var", "GROQ_BASE_URL:" + mockUrl + "/groq", "--var", "GROQ_API_KEY:groq-key",
    "--var", "SAMBANOVA_BASE_URL:" + mockUrl + "/sambanova", "--var", "SAMBANOVA_API_KEY:samba-key",
@@ -231,7 +231,7 @@ try {
     const r = await chat("mock/midstream-error", say("hi"));
     assert.equal(r.status, 200);
     const { text } = await readStream(r);
-    assert.equal(text, "Partial answer \n\n[Reply interrupted: The model request failed: Provider disconnected]");
+    assert.equal(text, "Partial answer \n\n[Reply interrupted: The model request failed. Try again or choose another model.]");
   });
 
   await test("agent-only model is hidden after its 403", async () => {
@@ -313,7 +313,7 @@ try {
     const r = await post("/api/random-model", {});
     assert.equal(r.status, 200);
     const data = await r.json();
-    assert.ok(["mock/ok", "mock/slow-first", "mock/retry-429"].includes(data.model.id), data.model.id);
+    assert.ok(["mock/ok", "mock/slow-first", "mock/retry-429", "mock/system-400"].includes(data.model.id), data.model.id);
     assert.equal(data.mode, "stats");
     assert.equal(typeof data.measured_ms, "number");
     assert.match(data.note, /fastest free models/);

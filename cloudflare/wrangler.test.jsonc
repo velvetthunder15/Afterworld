@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "afterworld",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["enable_request_signal"],
+
+  // The frontend: everything in ../static is served by Workers Static Assets.
+  // "/" serves static/index.html. API routes don't match a file, so they reach the Worker.
+  "assets": {
+    "directory": "../static",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+
+  // Shared state for all isolates (catalog cache, latency stats, live measurements,
+  // 429s, request counter, agent-only list). SQLite-backed, so it works on the free plan.
+  "durable_objects": {
+    "bindings": [{ "name": "STATE", "class_name": "AfterworldState" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AfterworldState"] }],
+
+  // Workers AI, one of the optional hosts. Uses the account's daily free allocation;
+  // set WORKERS_AI_ENABLED to "false" to hide its models.
+  
+
+  "observability": { "enabled": true },
+
+  // API keys are secrets, never in this file:
+  //   npx wrangler secret put OPENROUTER_API_KEY
+  //   npx wrangler secret put GROQ_API_KEY        (optional)
+  //   npx wrangler secret put SAMBANOVA_API_KEY   (optional)
+  //   npx wrangler secret put MISTRAL_API_KEY     (optional)
+  // A host without a key is left out of the model list.
+  // For `wrangler dev`, put it in .dev.vars (git-ignored).
+  "vars": {}
+}
