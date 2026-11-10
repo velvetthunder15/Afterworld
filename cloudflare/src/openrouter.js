@@ -2,6 +2,8 @@
 // and urllib calls in main.py. Errors carry the same information the SDK's did
 // (status code and message), so the retry and error-message rules are unchanged.
 
+import { hostOf, hostBase, hostKey } from "./providers.js";
+
 export class ApiError extends Error {
   // kind: "status" (HTTP error), "stream" (error sent inside the stream),
   //       "timeout", or "connection"
@@ -99,13 +101,28 @@ function parseChunk(payload) {
     const message = typeof chunk.error === "object" ? chunk.error.message || JSON.stringify(chunk.error) : String(chunk.error);
     throw new ApiError("stream", message, null);
   }
-  if (!Array.isArray(chunk.choices)) chunk.choices = [];
+  if (!Array.isArray(chunk.choices)) {
+    // Workers AI's own stream format: {"response": "text", ...}
+    chunk.choices = typeof chunk.response === "string" && chunk.response
+      ? [{ index: 0, delta: { content: chunk.response } }]
+      : [];
+  }
   return chunk;
 }
 
 // Starts a streamed chat completion. Resolves once OpenRouter answers with headers;
 // returns an async iterator of chunks plus a close() to stop it early.
 export async function createChatStream(env, { model, messages, maxTokens, timeoutMs, signal }) {
+  const target = hostOf(model);
+  if (target.host && target.host.kind === "binding") {
+    return createWorkersAiStream(env, { model: target.raw, messages, maxTokens, timeoutMs, signal });
+  }
+  const url = target.host
+    ? hostBase(env, target.key) + "/chat/completions"
+    : baseUrl(env) + "/api/v1/chat/completions";
+  const apiKey = target.host ? hostKey(env, target.key) : env.OPENROUTER_API_KEY || "";
+  model = target.raw;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new DOMException("timeout", "TimeoutError")), timeoutMs);
   const onAbort = () => controller.abort(signal.reason);
@@ -113,12 +130,12 @@ export async function createChatStream(env, { model, messages, maxTokens, timeou
 
   let response;
   try {
-    response = await fetch(baseUrl(env) + "/api/v1/chat/completions", {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-        Authorization: "Bearer " + (env.OPENROUTER_API_KEY || ""),
+        Authorization: "Bearer " + apiKey,
         "User-Agent": "Afterworld/1.0",
       },
       body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: true }),
@@ -158,6 +175,54 @@ export async function createChatStream(env, { model, messages, maxTokens, timeou
       signal?.removeEventListener("abort", onAbort);
       chunks.return?.().catch(() => {});
       controller.abort();
+    },
+  };
+}
+
+// Workers AI through the AI binding. Its errors are exceptions with a message and a
+// numeric code rather than HTTP statuses, so they are mapped onto the statuses the
+// retry and error-message rules already understand.
+export function workersAiStatus(message) {
+  const text = (message || "").toLowerCase();
+  if (/neuron|daily free allocation|rate limit|too many requests|capacity|429|3040|4006/.test(text)) return 429;
+  if (/paid plan|workers paid|upgrade/.test(text)) return 402;
+  if (/no such model|not found|5007/.test(text)) return 404;
+  if (/bad input|invalid|5006|schema|required properties/.test(text)) return 400;
+  if (/auth|10000|permission/.test(text)) return 401;
+  return 500;
+}
+
+async function createWorkersAiStream(env, { model, messages, maxTokens, timeoutMs, signal }) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError("timeout", "Request timed out.")), timeoutMs);
+  });
+  let body;
+  try {
+    body = await Promise.race([
+      env.AI.run(model, { messages, max_tokens: maxTokens, stream: true }, signal ? { signal } : undefined),
+      timeout,
+    ]);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    const message = error?.message || String(error);
+    throw new ApiError("status", "Workers AI: " + message, workersAiStatus(message));
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!(body instanceof ReadableStream)) {
+    // Some models ignore stream: true and answer in one piece
+    const text = (body && (body.response ?? body.choices?.[0]?.message?.content)) || "";
+    const chunks = (async function* () {
+      if (text) yield { choices: [{ index: 0, delta: { content: String(text) } }] };
+    })();
+    return { chunks, close() {} };
+  }
+  const chunks = sseChunks(body, timeoutMs);
+  return {
+    chunks,
+    close() {
+      chunks.return?.().catch(() => {});
     },
   };
 }

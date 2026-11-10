@@ -19,6 +19,16 @@ import {
   isFree,
 } from "./catalog.js";
 import { ApiError, baseUrl, fetchJson, createChatStream } from "./openrouter.js";
+import {
+  HOSTS,
+  enabledHosts,
+  hostBase,
+  hostKey,
+  hostLabel,
+  parseMistralModels,
+  parseOpenAiModels,
+  parseWorkersAiModels,
+} from "./providers.js";
 import { AGENT_ONLY_TTL } from "./state.js";
 
 export { AfterworldState } from "./state.js";
@@ -132,7 +142,7 @@ class Ctx {
     const at = now();
     this.events.push({ type: "agent_only", id, reason, at });
     if (this.snap) this.snap.agentOnly[id] = { reason, at };
-    log(id + " looks like it only works inside an agentic tool, hiding it: " + reason);
+    log(id + (String(reason).startsWith("paid:") ? " needs a paid plan, hiding it: " : " looks like it only works inside an agentic tool, hiding it: ") + reason);
   }
 
   // Save what this request saw. Runs after the response, so it never slows a reply.
@@ -154,26 +164,80 @@ class Ctx {
 
 class CatalogError extends Error {}
 
+async function fetchOpenRouterModels(ctx) {
+  ctx.spend();
+  const payload = await fetchJson(ctx.env, baseUrl(ctx.env) + "/api/v1/models", { timeoutMs: 20000 });
+  const models = normalizeModels(payload.data || []);
+  if (!models.length) throw new Error("OpenRouter returned no free chat models");
+  return models;
+}
+
+async function fetchHostModels(ctx, key) {
+  const env = ctx.env;
+  const host = HOSTS[key];
+  ctx.spend();
+  if (host.kind === "binding") {
+    const list = await Promise.race([
+      env.AI.models({ task: "Text Generation", per_page: 200, hide_experimental: true }),
+      sleep(15).then(() => { throw new Error("timed out"); }),
+    ]);
+    return parseWorkersAiModels(list);
+  }
+  const response = await fetch(hostBase(env, key) + "/models", {
+    headers: { Accept: "application/json", Authorization: "Bearer " + hostKey(env, key), "User-Agent": "Afterworld/1.0" },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error("HTTP " + response.status);
+  }
+  const payload = await response.json();
+  return key === "mistral" ? parseMistralModels(payload) : parseOpenAiModels(key, payload);
+}
+
 async function loadCatalog(ctx, force = false) {
   const snap = await ctx.load();
   const age = now() - snap.catalog.fetched_at;
   const have = snap.catalog.models.length > 0;
   if (have && age < MODELS_TTL && !(force && age >= REFRESH_MIN_AGE)) return;
 
-  try {
-    ctx.spend();
-    const payload = await fetchJson(ctx.env, baseUrl(ctx.env) + "/api/v1/models", { timeoutMs: 20000 });
-    const models = normalizeModels(payload.data || []);
-    if (!models.length) throw new Error("OpenRouter returned no free chat models");
-    snap.catalog = { models, fetched_at: now() };
-    await ctx.state.putCatalog(snap.catalog);
-  } catch (error) {
-    log("Could not refresh the model list:", String(error));
-    if (have) return; // keep showing the older list
-    throw new CatalogError(
-      "Couldn't load the free-model list from OpenRouter. Check your internet connection and try again."
-    );
+  // Every host is fetched at once. A host that fails keeps the models it had last time,
+  // so one host being down never empties the list.
+  const sources = [["openrouter", () => fetchOpenRouterModels(ctx)]].concat(
+    enabledHosts(ctx.env).map((key) => [key, () => fetchHostModels(ctx, key)])
+  );
+  const results = await Promise.all(
+    sources.map(([key, load]) => load().then((models) => [key, models, null], (error) => [key, null, error]))
+  );
+
+  const previous = snap.catalog.models;
+  const merged = [];
+  let fresh = 0;
+  for (const [key, models, error] of results) {
+    if (models) {
+      merged.push(...models);
+      fresh++;
+    } else {
+      log("Could not refresh the " + hostLabel(key) + " model list:", String(error));
+      merged.push(...previous.filter((m) => (m.host || "openrouter") === key));
+    }
   }
+
+  if (!merged.length) {
+    if (have) return; // keep showing the older list
+    throw new CatalogError("Couldn't load the free-model list. Check your internet connection and try again.");
+  }
+  if (!fresh) return;
+
+  const key = (m) => [m.provider.toLowerCase(), m.name.toLowerCase(), m.host || ""];
+  merged.sort((a, b) => {
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
+    return 0;
+  });
+  snap.catalog = { models: merged, fetched_at: now() };
+  await ctx.state.putCatalog(snap.catalog);
 }
 
 function agentOnlyIds(snap) {
@@ -274,7 +338,7 @@ async function refreshStats(ctx, models) {
   const found = {};
   // Every model is checked at the same time; whatever has not answered after
   // STATS_BUDGET seconds is left out, like as_completed(timeout=STATS_BUDGET).
-  const work = models.map((model) =>
+  const work = models.filter((model) => !model.host || model.host === "openrouter").map((model) =>
     fetchModelStats(ctx, model, snap.statUrls, found)
       .then((r) => { results[model.id] = r; })
       .catch(() => {})
@@ -391,6 +455,10 @@ async function probeModel(ctx, modelId) {
     if (status === 403 && isAgentOnly(message)) {
       ctx.markAgentOnly(modelId, message);
       return { ok: false, agent_only: true };
+    }
+    if (status === 402 && modelId.includes("::")) {
+      ctx.markAgentOnly(modelId, "paid: " + message);
+      return { ok: false, paid: true };
     }
     return { ok: false };
   } finally {
@@ -548,9 +616,26 @@ function accountLimitSentence() {
   return "You've hit OpenRouter's free-tier limit: " + accountLimitCriteria() + ". That limit is shared by every free model.";
 }
 
-function describeError(error, name = "This model") {
+function describeError(error, name = "This model", host = "openrouter") {
   const status = error instanceof ApiError ? error.status : null;
   const message = error?.message || String(error);
+
+  if (host && host !== "openrouter" && HOSTS[host]) {
+    const label = HOSTS[host].label;
+    if (status === 429) return name + " hit " + HOSTS[host].limits + ". Wait a bit, or choose another model.";
+    if (status === 401 || status === 403) {
+      return label + " rejected the request. Check the " + (HOSTS[host].keyVar || "AI binding") + " setting on the Worker.";
+    }
+    if (status === 402) {
+      return host === "workersai"
+        ? name + " needs the Workers Paid plan. Choose another model."
+        : label + " has no free credit left for that model.";
+    }
+    if (status === 404) return name + " isn't available on " + label + " any more. Choose another model.";
+    if (error?.kind === "timeout") return name + " took too long to respond. Try again or choose another model.";
+    if (error?.kind === "connection") return "Couldn't reach " + label + ". Try again or choose another model.";
+    return "The model request failed: " + message;
+  }
 
   if (status === 403 && isAgentOnly(message)) {
     return name + " only works inside an agentic tool (like a coding agent), not in a normal " +
@@ -622,10 +707,14 @@ async function openStream(ctx, model, messages, signal) {
       if (signal?.aborted) throw error;
 
       const status = error.status;
-      lastMessage = describeError(error, model.name);
+      lastMessage = describeError(error, model.name, model.host);
       log(model.id + " failed (" + (status || error.kind) + "): " + error.message);
 
       if (status === 429) ctx.recordThrottle(model.id);
+      if (status === 402 && model.host && model.host !== "openrouter") {
+        ctx.markAgentOnly(model.id, "paid: " + error.message);
+        break;
+      }
       if (status === 403 && isAgentOnly(error.message)) {
         ctx.markAgentOnly(model.id, error.message);
         break;
@@ -647,6 +736,9 @@ async function openStream(ctx, model, messages, signal) {
 
 async function requireFreeModel(ctx, modelId) {
   const snap = await ctx.load();
+  if (agentOnlyIds(snap).has(modelId) && String(snap.agentOnly[modelId]?.reason || "").startsWith("paid:")) {
+    throw new HttpError(400, "That model needs a paid plan on its host, so it has been removed from the model list. Choose another model.");
+  }
   if (agentOnlyIds(snap).has(modelId)) {
     throw new HttpError(400, "That model only works inside an agentic tool, not in a normal chat, so it " +
       "has been removed from the model list. Choose another model.");
@@ -676,6 +768,14 @@ async function requireFreeModel(ctx, modelId) {
 // Routes
 // ---------------------------------------------------------------------------
 
+function hostSummary(env, models) {
+  const counts = {};
+  for (const m of models) counts[m.host || "openrouter"] = (counts[m.host || "openrouter"] || 0) + 1;
+  return [{ key: "openrouter", label: "OpenRouter", count: counts.openrouter || 0, limits: accountLimitCriteria() }].concat(
+    enabledHosts(env).map((key) => ({ key, label: HOSTS[key].label, count: counts[key] || 0, limits: HOSTS[key].limits }))
+  );
+}
+
 async function apiModels(ctx, url) {
   const refresh = parseInt(url.searchParams.get("refresh") || "0", 10);
   if (Number.isNaN(refresh)) throw new HttpError(422, "refresh must be a number.");
@@ -696,8 +796,10 @@ async function apiModels(ctx, url) {
     count: models.length,
     fetched_at: iso(snap.catalog.fetched_at),
     source: "https://openrouter.ai/api/v1/models",
+    hosts: hostSummary(ctx.env, models),
     version: APP_VERSION,
-    excluded_agent_only: [...hidden].filter((id) => allIds.has(id)).length,
+    excluded_agent_only: [...hidden].filter((id) => allIds.has(id) && !String(snap.agentOnly[id]?.reason || "").startsWith("paid:")).length,
+    excluded_paid: [...hidden].filter((id) => allIds.has(id) && String(snap.agentOnly[id]?.reason || "").startsWith("paid:")).length,
     limits: { ...FREE_LIMITS },
   });
 }
@@ -744,7 +846,9 @@ async function apiProbe(ctx, request) {
     const result = await probeModel(ctx, model.id);
     let message;
     if (result.ok) message = model.name + " answered in " + result.ms + " ms.";
+    else if (result.paid) message = model.name + " needs a paid plan on " + model.host_label + ", so it has been removed from the list.";
     else if (result.agent_only) message = model.name + " only works inside an agentic tool, so it has been removed from the list.";
+    else if (result.throttled && model.host && model.host !== "openrouter") message = model.name + " hit " + HOSTS[model.host].limits + ".";
     else if (result.throttled) message = result.upstream ? model.name + "'s provider is rate limited right now." : accountLimitSentence();
     else message = model.name + " didn't answer.";
 
@@ -801,7 +905,7 @@ async function chat(ctx, request) {
       } catch (error) {
         stream.close();
         if (!request.signal?.aborted) {
-          controller.enqueue(encoder.encode("\n\n[Reply interrupted: " + describeError(error, model.name) + "]"));
+          controller.enqueue(encoder.encode("\n\n[Reply interrupted: " + describeError(error, model.name, model.host) + "]"));
         }
         controller.close();
       }

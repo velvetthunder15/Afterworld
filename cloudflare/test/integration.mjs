@@ -14,7 +14,10 @@ const mockUrl = "http://127.0.0.1:" + mock.address().port;
 const wrangler = spawn(
   "npx",
   ["wrangler", "dev", "--port", String(WORKER_PORT), "--ip", "127.0.0.1", "--persist-to", "/tmp/afterworld-test-state-" + Date.now(),
-   "--var", "OPENROUTER_BASE_URL:" + mockUrl, "--var", "OPENROUTER_API_KEY:test-key", "--log-level", "warn"],
+   "--var", "OPENROUTER_BASE_URL:" + mockUrl, "--var", "OPENROUTER_API_KEY:test-key", "--var", "WORKERS_AI_ENABLED:false",
+   "--var", "GROQ_BASE_URL:" + mockUrl + "/groq", "--var", "GROQ_API_KEY:groq-key",
+   "--var", "SAMBANOVA_BASE_URL:" + mockUrl + "/sambanova", "--var", "SAMBANOVA_API_KEY:samba-key",
+   "--var", "MISTRAL_BASE_URL:" + mockUrl + "/mistral", "--var", "MISTRAL_API_KEY:mistral-key", "--log-level", "warn"],
   { cwd: new URL("..", import.meta.url).pathname, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" } }
 );
 let logs = "";
@@ -87,16 +90,62 @@ try {
     const r = await fetch(BASE + "/api/models");
     assert.equal(r.status, 200);
     catalog = await r.json();
-    assert.equal(catalog.count, 8);
+    assert.equal(catalog.models.filter((m) => m.host === "openrouter").length, 8);
     assert.ok(!catalog.models.some((m) => m.id === "mock/paid"));
     assert.equal(catalog.version, "1.1.0");
-    assert.deepEqual(Object.keys(catalog.groupings).sort(), ["context", "input", "provider", "quality", "size"]);
+    assert.deepEqual(Object.keys(catalog.groupings).sort(), ["context", "host", "input", "provider", "quality", "size"]);
     const ok = catalog.models.find((m) => m.id === "mock/ok");
     assert.equal(ok.params_label, "7B");
     assert.equal(ok.vision, true);
     assert.equal(ok.context_label, "33K");
     assert.ok(!("_details" in ok));
     assert.deepEqual(catalog.limits, { per_minute: 20, per_day: 50, per_day_with_credits: 1000, credits_threshold: 10 });
+  });
+
+  await test("other hosts: Groq, SambaNova and Mistral models are listed with their host", async () => {
+    const ids = catalog.models.filter((m) => m.host !== "openrouter").map((m) => m.id).sort();
+    assert.deepEqual(ids, ["groq::mock/ok", "mistral::mistral-small-latest", "sambanova::Meta-Llama-3.3-70B-Instruct", "sambanova::mock/paid-host"]);
+    assert.equal(catalog.count, 12);
+    const samba = catalog.models.find((m) => m.id === "sambanova::Meta-Llama-3.3-70B-Instruct");
+    assert.equal(samba.provider, "Meta");
+    assert.equal(samba.provider_key, "meta-llama");
+    assert.equal(samba.host_label, "SambaNova");
+    assert.equal(samba.params_label, "70B");
+    assert.equal(samba.tiers.host, "sambanova");
+    const mistral = catalog.models.find((m) => m.id === "mistral::mistral-small-latest");
+    assert.equal(mistral.vision, true);
+    assert.equal(mistral.tools, true);
+    assert.deepEqual(catalog.groupings.host.groups.map((g) => g.key).sort(), ["groq", "mistral", "openrouter", "sambanova"]);
+    assert.deepEqual(catalog.hosts.map((h) => h.key), ["openrouter", "groq", "sambanova", "mistral"]);
+  });
+
+  await test("other hosts: chats go to the right host with the right key and model id", async () => {
+    for (const [id, host, key, raw, text] of [
+      ["groq::mock/ok", "groq", "groq-key", "mock/ok", "Hello there"],
+      ["sambanova::Meta-Llama-3.3-70B-Instruct", "sambanova", "samba-key", "Meta-Llama-3.3-70B-Instruct", "SambaNova says hi."],
+      ["mistral::mistral-small-latest", "mistral", "mistral-key", "mistral-small-latest", "Mistral says hi."],
+    ]) {
+      const before = calls.length;
+      const r = await fetch(BASE + "/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: id, messages: say("Hello") }) });
+      assert.equal(r.status, 200, id);
+      assert.equal(r.headers.get("x-model"), id);
+      assert.ok((await r.text()).startsWith(text), id);
+      const call = calls.slice(before).find((c) => c.path.endsWith("/chat/completions"));
+      assert.equal(call.host, host);
+      assert.equal(call.auth, "Bearer " + key);
+      assert.equal(call.body.model, raw);
+    }
+  });
+
+  await test("other hosts: a model that needs a paid plan is hidden after its 402", async () => {
+    const r = await fetch(BASE + "/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "sambanova::mock/paid-host", messages: say("Hello") }) });
+    assert.equal(r.status, 503);
+    assert.match((await r.json()).detail, /paid plan|free credit/);
+    const list = await (await fetch(BASE + "/api/models")).json();
+    assert.ok(!list.models.some((m) => m.id === "sambanova::mock/paid-host"));
+    const again = await fetch(BASE + "/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "sambanova::mock/paid-host", messages: say("Hello") }) });
+    assert.equal(again.status, 400);
+    assert.match((await again.json()).detail, /paid plan/);
   });
 
   await test("catalog is cached (no second OpenRouter fetch)", async () => {
@@ -180,7 +229,7 @@ try {
     assert.match((await r.json()).detail, /agentic tool/);
     assert.equal(chatCalls("mock/agent-only").length, 1);
     const list = await (await fetch(BASE + "/api/models")).json();
-    assert.equal(list.count, 7);
+    assert.equal(list.models.filter((m) => m.host === "openrouter").length, 7);
     assert.equal(list.excluded_agent_only, 1);
     const again = await chat("mock/agent-only", say("hi"));
     assert.equal(again.status, 400);
@@ -239,7 +288,7 @@ try {
     const r = await fetch(BASE + "/api/live");
     assert.equal(r.status, 200);
     const live = await r.json();
-    assert.equal(Object.keys(live.models).length, 7);
+    assert.equal(Object.keys(live.models).filter((id) => !id.includes("::")).length, 7);
     assert.equal(live.models["mock/ok"].latency_source, "measured");
     assert.equal(live.models["mock/slow-first"].latency_ms, 300); // 0.3 s from the stats, scaled to ms
     assert.equal(live.models["mock/slow-first"].latency_source, "openrouter");

@@ -320,6 +320,8 @@ export function buildModel(entry) {
     full_name: fullName,
     provider,
     provider_key: author,
+    host: "openrouter",
+    host_label: "OpenRouter",
     description: cleanDescription(entry.description),
     context,
     context_label: formatTokens(context),
@@ -345,6 +347,7 @@ export function buildModel(entry) {
       quality: qualityTier(score),
       input: inputTier(inputs),
       provider: author,
+      host: "openrouter",
     },
     _details: (entry.links || {}).details || null,
   };
@@ -398,6 +401,21 @@ export function buildGroupings(models) {
     title: "Provider",
     hint: "The company behind the model",
     groups: ordered.map((key) => ({ key, label: labels.get(key) })),
+  };
+
+  const hostCounts = new Map();
+  const hostLabels = new Map();
+  for (const model of models) {
+    const key = model.host || "openrouter";
+    hostCounts.set(key, (hostCounts.get(key) || 0) + 1);
+    if (!hostLabels.has(key)) hostLabels.set(key, model.host_label || "OpenRouter");
+  }
+  groupings.host = {
+    title: "Host",
+    hint: "The service Afterworld sends the chat to",
+    groups: [...hostCounts.keys()]
+      .sort((a, b) => hostCounts.get(b) - hostCounts.get(a) || (hostLabels.get(a) < hostLabels.get(b) ? -1 : 1))
+      .map((key) => ({ key, label: hostLabels.get(key) })),
   };
   return groupings;
 }

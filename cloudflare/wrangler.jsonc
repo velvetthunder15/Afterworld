@@ -21,10 +21,18 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AfterworldState"] }],
 
+  // Workers AI, one of the optional hosts. Uses the account's daily free allocation;
+  // set WORKERS_AI_ENABLED to "false" to hide its models.
+  "ai": { "binding": "AI" },
+
   "observability": { "enabled": true },
 
-  // OPENROUTER_API_KEY is a secret, never in this file:
+  // API keys are secrets, never in this file:
   //   npx wrangler secret put OPENROUTER_API_KEY
+  //   npx wrangler secret put GROQ_API_KEY        (optional)
+  //   npx wrangler secret put SAMBANOVA_API_KEY   (optional)
+  //   npx wrangler secret put MISTRAL_API_KEY     (optional)
+  // A host without a key is left out of the model list.
   // For `wrangler dev`, put it in .dev.vars (git-ignored).
   "vars": {}
 }
