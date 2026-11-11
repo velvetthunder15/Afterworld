@@ -13,6 +13,7 @@
 import {
   KNOWN_AGENT_ONLY_IDS,
   AGENT_ONLY_HINTS,
+  SYSTEM_PROMPT,
   normalizeModels,
   publicModel,
   buildGroupings,
@@ -50,10 +51,9 @@ const MEASURED_MAX_AGE = 1800;
 
 const FREE_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000, credits_threshold: 10 };
 
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 const CATALOG_SCHEMA = 2;
 
-const SYSTEM_PROMPT = "You are a helpful chatbot.";
 const MAX_TOKENS_CAP = 4096;
 const MAX_HISTORY = 20;
 const CHAT_TIMEOUT = 45;

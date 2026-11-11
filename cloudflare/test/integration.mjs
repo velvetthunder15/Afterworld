@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { SYSTEM_PROMPT } from "../src/catalog.js";
 import { start, calls } from "./mock-openrouter.mjs";
 
 const WORKER_PORT = 8788;
@@ -106,7 +107,7 @@ try {
     catalog = await r.json();
     assert.equal(catalog.models.filter((m) => m.host === "openrouter").length, 8);
     assert.ok(!catalog.models.some((m) => m.id === "mock/paid"));
-    assert.equal(catalog.version, "2.0.0");
+    assert.equal(catalog.version, "2.1.0");
     assert.deepEqual(Object.keys(catalog.groupings).sort(), ["context", "host", "input", "provider", "quality", "size"]);
     const ok = catalog.models.find((m) => m.id === "mock/ok");
     assert.equal(ok.params_label, "7B");
@@ -193,7 +194,7 @@ try {
     assert.equal(sent.auth, "Bearer test-key");
     assert.equal(sent.body.stream, true);
     assert.equal(sent.body.max_tokens, 2048);
-    assert.deepEqual(sent.body.messages[0], { role: "system", content: "You are a helpful chatbot." });
+    assert.deepEqual(sent.body.messages[0], { role: "system", content: SYSTEM_PROMPT });
   });
 
   await test("history is cleaned: merged roles, starts with user", async () => {
@@ -225,7 +226,7 @@ try {
     const sent = chatCalls("mock/system-400");
     assert.equal(sent.length, 2);
     assert.equal(sent[1].body.messages[0].role, "user");
-    assert.match(sent[1].body.messages[0].content, /^You are a helpful chatbot\.\n\nhi$/);
+    assert.equal(sent[1].body.messages[0].content, SYSTEM_PROMPT + "\n\nhi");
   });
 
   await test("empty replies give up after 3 attempts with a 503", async () => {

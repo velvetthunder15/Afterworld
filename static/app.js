@@ -424,7 +424,7 @@ function removeChatImages(convo) {
 }
 
 /* ==========================================================
-   Rich HTML-Safe Markdown Renderer (Tables, Quotes, Code, Lists)
+   Gemini-Grade Recursive Markdown, Math, Code & <think> Engine
    ========================================================== */
 function escapeHtml(text) {
     return String(text || "")
@@ -434,167 +434,552 @@ function escapeHtml(text) {
         .replace(/"/g, "&quot;");
 }
 
-function inlineMarkdown(text) {
-    let s = escapeHtml(text);
-    const codes = [];
+const LANG_LABELS = {
+    js: "JavaScript", javascript: "JavaScript", mjs: "JavaScript", cjs: "JavaScript", jsx: "JSX",
+    ts: "TypeScript", typescript: "TypeScript", tsx: "TSX",
+    py: "Python", python: "Python",
+    rb: "Ruby", rs: "Rust", rust: "Rust", go: "Go", golang: "Go",
+    java: "Java", kt: "Kotlin", kotlin: "Kotlin", swift: "Swift",
+    c: "C", cpp: "C++", "c++": "C++", cc: "C++", cxx: "C++", h: "C/C++ Header", hpp: "C++ Header",
+    cs: "C#", csharp: "C#",
+    sh: "Bash", bash: "Bash", zsh: "Shell", shell: "Shell", ps1: "PowerShell", powershell: "PowerShell",
+    html: "HTML", xml: "XML", svg: "SVG", css: "CSS", scss: "SCSS",
+    json: "JSON", jsonc: "JSON", yaml: "YAML", yml: "YAML", toml: "TOML",
+    sql: "SQL", md: "Markdown", markdown: "Markdown", tex: "LaTeX", latex: "LaTeX",
+    matlab: "MATLAB", r: "R", php: "PHP", lua: "Lua", dart: "Dart", dockerfile: "Dockerfile"
+};
 
-    s = s.replace(/`([^`]+)`/g, (_, code) => {
-        codes.push(code);
-        return "\u0001" + (codes.length - 1) + "\u0001";
-    });
-    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
-    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
-    s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-    s = s.replace(
-        /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
-    );
-    s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => "<code>" + codes[i] + "</code>");
+const CODE_TOKEN_RE = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#(?![!\[])[^\n]*)|("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|(@[A-Za-z_]\w*)|\b(0x[0-9a-fA-F_]+|0b[01_]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)\b|\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|import|from|in|not|and|or|is|None|True|False|lambda|yield|async|await|pass|break|continue|raise|global|nonlocal|assert|del|const|let|var|function|new|this|super|extends|export|default|switch|case|throw|catch|typeof|instanceof|void|delete|null|undefined|true|false|interface|type|enum|implements|public|private|protected|readonly|static|fn|pub|mut|impl|struct|trait|match|use|mod|crate|where|go|chan|defer|package|func|select|int|float|double|char|bool|string|auto|unsigned|signed|long|short|size_t|include|define|ifdef|ifndef|endif|pragma|namespace|using|template|typename|virtual|override|SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|GROUP|ORDER|BY|HAVING|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|TABLE|ALTER|DROP|INDEX|LIMIT|OFFSET|DISTINCT|UNION|ALL|AND|OR|NOT|NULL|IS|IN)\b|\b([A-Za-z_]\w*)(?=\s*\()/g;
+
+function highlightCode(rawCode, lang) {
+    const cleanLang = (lang || "").trim().toLowerCase();
+    if (cleanLang === "text" || cleanLang === "plaintext" || cleanLang === "txt" || cleanLang === "ascii") {
+        return escapeHtml(rawCode);
+    }
+    let out = "";
+    let last = 0;
+    CODE_TOKEN_RE.lastIndex = 0;
+    let m;
+    while ((m = CODE_TOKEN_RE.exec(rawCode)) !== null) {
+        if (m.index > last) out += escapeHtml(rawCode.slice(last, m.index));
+        const tok = m[0];
+        let cls = "";
+        if (m[1] !== undefined) cls = "tok-com";
+        else if (m[2] !== undefined) cls = "tok-str";
+        else if (m[3] !== undefined) cls = "tok-dec";
+        else if (m[4] !== undefined) cls = "tok-num";
+        else if (m[5] !== undefined) cls = "tok-kw";
+        else if (m[6] !== undefined) cls = "tok-fn";
+        out += cls ? '<span class="' + cls + '">' + escapeHtml(tok) + "</span>" : escapeHtml(tok);
+        last = m.index + tok.length;
+    }
+    if (last < rawCode.length) out += escapeHtml(rawCode.slice(last));
+    return out;
+}
+
+function formatMathFallback(tex) {
+    return escapeHtml(tex)
+        .replace(/\\times\b/g, "×")
+        .replace(/\\cdot\b/g, "·")
+        .replace(/\\pm\b/g, "±")
+        .replace(/\\le(?:q)?\b/g, "≤")
+        .replace(/\\ge(?:q)?\b/g, "≥")
+        .replace(/\\ne(?:q)?\b/g, "≠")
+        .replace(/\\approx\b/g, "≈")
+        .replace(/\\infty\b/g, "∞")
+        .replace(/\\rightarrow\b|\\to\b/g, "→")
+        .replace(/\\leftarrow\b/g, "←")
+        .replace(/\\Rightarrow\b/g, "⇒")
+        .replace(/\\alpha\b/g, "α")
+        .replace(/\\beta\b/g, "β")
+        .replace(/\\gamma\b/g, "γ")
+        .replace(/\\delta\b/g, "δ")
+        .replace(/\\sigma\b/g, "σ")
+        .replace(/\\pi\b/g, "π")
+        .replace(/\\mu\b/g, "μ")
+        .replace(/\\lambda\b/g, "λ")
+        .replace(/\\theta\b/g, "θ");
+}
+
+function renderMathHtml(tex, displayMode) {
+    const clean = String(tex || "").trim();
+    if (!clean) return "";
+    if (typeof window !== "undefined" && window.katex && typeof window.katex.renderToString === "function") {
+        try {
+            const html = window.katex.renderToString(clean, { displayMode: !!displayMode, throwOnError: false, strict: "ignore" });
+            return displayMode ? '<div class="math-block">' + html + "</div>" : '<span class="math-inline">' + html + "</span>";
+        } catch (_) {}
+    }
+    const fb = formatMathFallback(clean);
+    return displayMode
+        ? '<div class="math-block math-fallback">' + fb + "</div>"
+        : '<code class="math-inline math-fallback">' + fb + "</code>";
+}
+
+function formatInlineStyles(s) {
+    s = s.replace(/\*\*\*(?=\S)([\s\S]*?\S)\*\*\*/g, "<strong><em>$1</em></strong>");
+    s = s.replace(/(^|[^\w])___(?=\S)([\s\S]*?\S)___(?![\w])/g, "$1<strong><em>$2</em></strong>");
+    s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?![\w])/g, "$1<strong>$2</strong>");
+    s = s.replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![*\w])/g, "$1<em>$2</em>");
+    s = s.replace(/(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?![\w])/g, "$1<em>$2</em>");
+    s = s.replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>");
     return s;
 }
 
-function codeBlockHtml(block) {
+function inlineMarkdown(rawText) {
+    let s = escapeHtml(rawText);
+    const stash = [];
+    const put = (html) => {
+        const id = "\uE000" + stash.length + "\uE001";
+        stash.push(html);
+        return id;
+    };
+
+    // 1. Protect multi-backtick & single-backtick inline code first
+    s = s.replace(/``([^\n]+?)``|`([^`\n]+?)`/g, (_, c1, c2) => {
+        const code = c1 !== undefined ? c1.trim() : c2;
+        return put("<code>" + code + "</code>");
+    });
+
+    // 2. Protect inline display/inline math: $$...$$, \(...\), and $...$
+    s = s.replace(/\$\$([^\n$]+?)\$\$/g, (_, tex) => put(renderMathHtml(tex.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"), false)));
+    s = s.replace(/\\\(([^\n]+?)\\\)/g, (_, tex) => put(renderMathHtml(tex.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"), false)));
+    s = s.replace(/(^|[^\$\\])\$(?!\s)([^\$\n]{1,180}?[^\s\$\\])\$(?!\d)/g, (_, pre, tex) => {
+        return pre + put(renderMathHtml(tex.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"), false));
+    });
+    s = s.replace(/(^|[^\$\\])\$([A-Za-z0-9])\$/g, (_, pre, tex) => pre + put(renderMathHtml(tex, false)));
+
+    // 3. Protect Markdown links [label](https://...)
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+        return put('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + formatInlineStyles(label) + "</a>");
+    });
+
+    // 4. Auto-link bare URLs
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<.,:;"')\]])/g, (_, pre, url) => {
+        return pre + put('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + "</a>");
+    });
+
+    // 5. Apply bold, italic, strikethrough
+    s = formatInlineStyles(s);
+
+    // 6. Unescape escaped markdown punctuation (\*, \_, \|, \$)
+    s = s.replace(/\\([*_~`|\\$])/g, "$1");
+
+    // 7. Restore stashed HTML tokens (run twice in case a link label held stashed code/math)
+    s = s.replace(/\uE000(\d+)\uE001/g, (_, i) => stash[Number(i)]);
+    s = s.replace(/\uE000(\d+)\uE001/g, (_, i) => stash[Number(i)]);
+    return s;
+}
+
+function codeBlockHtml(langRaw, rawCode) {
+    const token = (langRaw || "").trim().split(/\s+/)[0].toLowerCase();
+    const label = LANG_LABELS[token] || (token ? token : "Code");
     return (
         '<div class="code">' +
-        '<div class="code-bar"><span>' + escapeHtml(block.lang || "code") + '</span>' +
+        '<div class="code-bar"><span class="code-lang">' + escapeHtml(label) + '</span>' +
         '<button type="button" class="mini-btn copy-code">' + ICONS.copy + ' Copy</button></div>' +
-        "<pre><code>" + escapeHtml(block.code) + "</code></pre></div>"
+        "<pre><code>" + highlightCode(rawCode, token) + "</code></pre></div>"
     );
 }
 
-function isTableSeparator(line) {
+function expandLeadingTabs(line) {
+    return line.replace(/^[ \t]+/, (ws) => ws.replace(/\t/g, "    "));
+}
+
+function leadingSpaces(line) {
+    let n = 0;
+    while (n < line.length && line[n] === " ") n++;
+    return n;
+}
+
+function stripIndent(line, cols) {
+    const exp = expandLeadingTabs(line);
+    let n = 0;
+    while (n < cols && n < exp.length && exp[n] === " ") n++;
+    return exp.slice(n);
+}
+
+function matchFenceOpen(line) {
+    const exp = expandLeadingTabs(line);
+    const m = exp.match(/^([ ]{0,12})(`{3,}|~{3,})(.*)$/);
+    if (!m) return null;
+    const ch = m[2][0];
+    if (ch === "`" && m[3].includes("`")) return null;
+    return { indent: m[1].length, fenceChar: ch, fenceLen: m[2].length, info: m[3].trim() };
+}
+
+function isFenceClose(line, fenceChar, fenceLen) {
+    const exp = expandLeadingTabs(line);
+    const re = new RegExp("^[ ]{0,12}" + fenceChar + "{" + fenceLen + ",}[ \\t]*$");
+    return re.test(exp);
+}
+
+function matchListMarker(line) {
+    const exp = expandLeadingTabs(line);
+    const m = exp.match(/^([ ]*)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*)|$)/);
+    if (!m) return null;
+    if (/^(?:-\s*-\s*-[-\s]*|\*\s*\*\s*\*[\*\s]*)$/.test(exp.trim())) return null;
+    if (m[3] === undefined || m[3] === "") {
+        if (!/[ \t]$/.test(exp)) return null;
+    }
+    const marker = m[2];
+    const ordered = /^\d/.test(marker);
+    return {
+        indent: m[1].length,
+        type: ordered ? "ol" : "ul",
+        start: ordered ? parseInt(marker, 10) : 1,
+        markerWidth: marker.length + 1,
+        rest: m[3] || ""
+    };
+}
+
+function splitTableRow(line) {
+    const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    const cells = [];
+    let cur = "";
+    let inCode = false;
+    for (let i = 0; i < trimmed.length; i++) {
+        const ch = trimmed[i];
+        if (ch === "\\" && i + 1 < trimmed.length) {
+            cur += ch + trimmed[++i];
+            continue;
+        }
+        if (ch === "`") inCode = !inCode;
+        if (ch === "|" && !inCode) {
+            cells.push(cur.trim());
+            cur = "";
+        } else {
+            cur += ch;
+        }
+    }
+    cells.push(cur.trim());
+    return cells;
+}
+
+function parseTableAlignments(line) {
     const t = line.trim();
-    if (!t.includes("|") && !t.includes("-")) return false;
-    const cells = t.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-    return cells.length >= 2 && cells.every((c) => /^:?-{3,}:?$/.test(c));
+    if (!t.includes("|") && !t.includes("-")) return null;
+    const cells = splitTableRow(t);
+    if (cells.length < 2) return null;
+    const aligns = [];
+    for (const c of cells) {
+        if (!/^:?-{2,}:?$/.test(c)) return null;
+        if (c.startsWith(":") && c.endsWith(":")) aligns.push("center");
+        else if (c.endsWith(":")) aligns.push("right");
+        else aligns.push("left");
+    }
+    return aligns;
 }
 
-function splitTableCells(line) {
-    return line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+function isBlockStarter(line) {
+    const exp = expandLeadingTabs(line);
+    const trimmed = exp.trim();
+    if (!trimmed) return true;
+    if (matchFenceOpen(exp)) return true;
+    if (/^[ ]{0,3}(?:-\s*-\s*-[-\s]*|\*\s*\*\s*\*[\*\s]*|_\s*_\s*_[_\s]*)$/.test(exp)) return true;
+    if (/^[ ]{0,3}#{1,6}[ \t]+/.test(exp)) return true;
+    if (/^[ ]{0,3}>/.test(exp)) return true;
+    if (/^[ ]{0,3}(\$\$|\\\[)/.test(exp)) return true;
+    if (matchListMarker(exp)) return true;
+    return false;
 }
 
-function renderMarkdown(source) {
-    const blocks = [];
-    const text = String(source || "").replace(/```([\w+#.-]*)[ \t]*\n([\s\S]*?)(?:```|$)/g, (_, lang, code) => {
-        blocks.push({ lang, code: code.replace(/\n$/, "") });
-        return "\n\u0000" + (blocks.length - 1) + "\u0000\n";
-    });
-
-    const lines = text.split("\n");
+function parseBlocks(lines, { inListItem = false } = {}) {
     let html = "";
-    let listType = null;
+    let i = 0;
     let paragraph = [];
-    let quoteLines = [];
 
     const flushParagraph = () => {
-        if (paragraph.length) {
-            html += "<p>" + inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>") + "</p>";
-            paragraph = [];
-        }
-    };
-    const closeList = () => {
-        if (listType) {
-            html += "</" + listType + ">";
-            listType = null;
-        }
-    };
-    const flushQuote = () => {
-        if (quoteLines.length) {
-            html += "<blockquote><p>" + inlineMarkdown(quoteLines.join("\n")).replace(/\n/g, "<br>") + "</p></blockquote>";
-            quoteLines = [];
-        }
+        if (!paragraph.length) return;
+        const body = inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>");
+        html += "<p>" + body + "</p>";
+        paragraph = [];
     };
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trimEnd();
-        let m;
+    while (i < lines.length) {
+        const rawLine = lines[i];
+        const line = expandLeadingTabs(rawLine).trimEnd();
+        const trimmed = line.trim();
 
-        if (!line.trim()) {
+        if (!trimmed) {
             flushParagraph();
-            closeList();
-            flushQuote();
+            i++;
             continue;
         }
 
-        if ((m = line.match(/^\u0000(\d+)\u0000$/))) {
+        const fence = matchFenceOpen(line);
+        if (fence) {
             flushParagraph();
-            closeList();
-            flushQuote();
-            html += codeBlockHtml(blocks[Number(m[1])]);
-            continue;
-        }
-
-        // Markdown table check
-        if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-            flushParagraph();
-            closeList();
-            flushQuote();
-            const headers = splitTableCells(line);
-            i++; // skip separator
-            let tbl = '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
-            headers.forEach((h) => { tbl += "<th>" + inlineMarkdown(h) + "</th>"; });
-            tbl += "</tr></thead><tbody>";
-            while (i + 1 < lines.length && lines[i + 1].trim() && lines[i + 1].includes("|") && !/^\u0000/.test(lines[i + 1])) {
+            const codeLines = [];
+            i++;
+            while (i < lines.length && !isFenceClose(lines[i], fence.fenceChar, fence.fenceLen)) {
+                codeLines.push(stripIndent(lines[i], fence.indent));
                 i++;
-                const rowCells = splitTableCells(lines[i]);
-                tbl += "<tr>";
-                for (let c = 0; c < headers.length; c++) {
-                    tbl += "<td>" + inlineMarkdown(rowCells[c] || "") + "</td>";
-                }
-                tbl += "</tr>";
             }
-            tbl += "</tbody></table></div>";
-            html += tbl;
+            if (i < lines.length) i++;
+            html += codeBlockHtml(fence.info, codeLines.join("\n"));
             continue;
         }
 
-        if ((m = line.match(/^>\s?(.*)$/))) {
+        let mathSingle;
+        if ((mathSingle = trimmed.match(/^\$\$([\s\S]+?)\$\$$/)) || (mathSingle = trimmed.match(/^\\\[([\s\S]+?)\\\]$/))) {
             flushParagraph();
-            closeList();
-            quoteLines.push(m[1]);
-            continue;
-        } else {
-            flushQuote();
-        }
-
-        if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
-            flushParagraph();
-            closeList();
-            const level = Math.min(6, Math.max(2, m[1].length + 1));
-            html += "<h" + level + ">" + inlineMarkdown(m[2]) + "</h" + level + ">";
+            html += renderMathHtml(mathSingle[1], true);
+            i++;
             continue;
         }
-
-        if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
+        if (trimmed === "$$" || trimmed === "\\[") {
             flushParagraph();
-            closeList();
+            const closeTok = trimmed === "$$" ? "$$" : "\\]";
+            const texLines = [];
+            i++;
+            while (i < lines.length && lines[i].trim() !== closeTok) {
+                texLines.push(lines[i]);
+                i++;
+            }
+            if (i < lines.length) i++;
+            html += renderMathHtml(texLines.join("\n"), true);
+            continue;
+        }
+
+        let hm;
+        if ((hm = line.match(/^[ ]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*$/))) {
+            flushParagraph();
+            const rawLvl = hm[1].length;
+            const tagLvl = rawLvl === 1 ? 2 : Math.min(5, rawLvl);
+            const cls = rawLvl === 1 ? ' class="md-h1"' : "";
+            html += "<h" + tagLvl + cls + ">" + inlineMarkdown(hm[2]) + "</h" + tagLvl + ">";
+            i++;
+            continue;
+        }
+
+        // Setext Heading (Title\n====== or Subtitle\n------)
+        let setext;
+        if (paragraph.length && (setext = line.match(/^[ ]{0,3}(={3,}|-{3,})[ \t]*$/))) {
+            const headingText = paragraph.join(" ").replace(/^\*\*(.+)\*\*$/, "$1");
+            paragraph = [];
+            const isH1 = setext[1][0] === "=";
+            html += isH1
+                ? '<h2 class="md-h1">' + inlineMarkdown(headingText) + "</h2>"
+                : "<h3>" + inlineMarkdown(headingText) + "</h3>";
+            i++;
+            continue;
+        }
+
+        if (/^[ ]{0,3}(?:-\s*-\s*-[-\s]*|\*\s*\*\s*\*[\*\s]*|_\s*_\s*_[_\s]*)$/.test(line)) {
+            flushParagraph();
             html += "<hr>";
+            i++;
             continue;
         }
 
-        if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) {
+        if (line.includes("|") && i + 1 < lines.length) {
+            const aligns = parseTableAlignments(lines[i + 1]);
+            if (aligns) {
+                const headers = splitTableRow(line);
+                if (headers.length >= 2) {
+                    flushParagraph();
+                    i += 2;
+                    let tbl = '<div class="md-table-wrap"><table class="md-table"><thead><tr>';
+                    for (let c = 0; c < headers.length; c++) {
+                        const al = aligns[c] && aligns[c] !== "left" ? ' style="text-align:' + aligns[c] + '"' : "";
+                        tbl += "<th" + al + ">" + inlineMarkdown(headers[c]) + "</th>";
+                    }
+                    tbl += "</tr></thead><tbody>";
+                    while (i < lines.length) {
+                        const rowLine = lines[i].trim();
+                        if (!rowLine || !rowLine.includes("|") || matchFenceOpen(lines[i])) break;
+                        const cells = splitTableRow(rowLine);
+                        tbl += "<tr>";
+                        for (let c = 0; c < headers.length; c++) {
+                            const al = aligns[c] && aligns[c] !== "left" ? ' style="text-align:' + aligns[c] + '"' : "";
+                            tbl += "<td" + al + ">" + inlineMarkdown(cells[c] || "") + "</td>";
+                        }
+                        tbl += "</tr>";
+                        i++;
+                    }
+                    tbl += "</tbody></table></div>";
+                    html += tbl;
+                    continue;
+                }
+            }
+        }
+
+        if (/^[ ]{0,3}>/.test(line)) {
             flushParagraph();
-            if (listType !== "ul") { closeList(); html += "<ul>"; listType = "ul"; }
-            html += "<li>" + inlineMarkdown(m[1]) + "</li>";
+            const qLines = [];
+            while (i < lines.length && /^[ ]{0,3}>/.test(expandLeadingTabs(lines[i]))) {
+                qLines.push(expandLeadingTabs(lines[i]).replace(/^[ ]{0,3}>\s?/, ""));
+                i++;
+            }
+            const callout = qLines[0] && qLines[0].match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(.*)$/i);
+            if (callout) {
+                const kind = callout[1].toLowerCase();
+                const title = callout[2].trim() || (kind.charAt(0).toUpperCase() + kind.slice(1));
+                const rest = qLines.slice(1);
+                html += '<div class="callout callout-' + kind + '"><div class="callout-title">' + inlineMarkdown(title) + "</div>" + parseBlocks(rest) + "</div>";
+            } else {
+                html += "<blockquote>" + parseBlocks(qLines) + "</blockquote>";
+            }
             continue;
         }
 
-        if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) {
+        const firstList = matchListMarker(line);
+        if (firstList && (firstList.type === "ul" || firstList.start === 1 || paragraph.length === 0)) {
             flushParagraph();
-            if (listType !== "ol") { closeList(); html += "<ol>"; listType = "ol"; }
-            html += "<li>" + inlineMarkdown(m[1]) + "</li>";
+            const baseIndent = firstList.indent;
+            const listType = firstList.type;
+            const startAttr = listType === "ol" && firstList.start !== 1 ? ' start="' + firstList.start + '"' : "";
+            const items = [];
+
+            while (i < lines.length) {
+                const cur = matchListMarker(lines[i]);
+                if (!cur) break;
+                if (cur.indent > baseIndent + 1 || cur.indent < baseIndent - 1 || cur.type !== listType) break;
+
+                const itemFirst = cur.rest;
+                const childLines = [];
+                i++;
+
+                while (i < lines.length) {
+                    const nextRaw = lines[i];
+                    const nextExp = expandLeadingTabs(nextRaw).trimEnd();
+                    const nextTrim = nextExp.trim();
+
+                    if (!nextTrim) {
+                        let k = i + 1;
+                        while (k < lines.length && !lines[k].trim()) k++;
+                        if (k >= lines.length) break;
+
+                        const afterExp = expandLeadingTabs(lines[k]);
+                        const afterInd = leadingSpaces(afterExp);
+                        const afterMarker = matchListMarker(afterExp);
+
+                        if (afterInd >= baseIndent + 2) {
+                            childLines.push("");
+                            i = k;
+                            continue;
+                        }
+                        if (afterMarker && Math.abs(afterMarker.indent - baseIndent) <= 1 && afterMarker.type === listType) {
+                            i = k;
+                            break;
+                        }
+                        break;
+                    }
+
+                    const nextInd = leadingSpaces(nextExp);
+
+                    if (nextInd >= baseIndent + 2) {
+                        const innerFence = matchFenceOpen(nextExp);
+                        if (innerFence) {
+                            childLines.push(nextExp);
+                            i++;
+                            while (i < lines.length && !isFenceClose(lines[i], innerFence.fenceChar, innerFence.fenceLen)) {
+                                childLines.push(expandLeadingTabs(lines[i]));
+                                i++;
+                            }
+                            if (i < lines.length) {
+                                childLines.push(expandLeadingTabs(lines[i]));
+                                i++;
+                            }
+                            continue;
+                        }
+                        childLines.push(nextExp);
+                        i++;
+                        continue;
+                    }
+
+                    const maybeSub = matchListMarker(nextExp);
+                    if (maybeSub) {
+                        if (nextInd >= baseIndent + 1 && maybeSub.type !== listType) {
+                            childLines.push("  " + nextExp.trimStart());
+                            i++;
+                            continue;
+                        }
+                        break;
+                    }
+
+                    if (isBlockStarter(nextExp)) break;
+
+                    childLines.push(" ".repeat(baseIndent + 2) + nextTrim);
+                    i++;
+                }
+
+                items.push({ first: itemFirst, children: childLines });
+            }
+
+            html += "<" + listType + startAttr + ">";
+            for (const item of items) {
+                let lead = item.first;
+                let taskPrefix = "";
+                const taskMatch = lead.match(/^\[([ xX])\][ \t]+(.*)$/);
+                if (taskMatch) {
+                    const checked = taskMatch[1].toLowerCase() === "x";
+                    taskPrefix = '<input type="checkbox" class="task-chk" disabled' + (checked ? " checked" : "") + "> ";
+                    lead = taskMatch[2];
+                }
+
+                if (!item.children.length) {
+                    html += "<li" + (taskPrefix ? ' class="task-li"' : "") + ">" + taskPrefix + inlineMarkdown(lead) + "</li>";
+                } else {
+                    const nonEmpty = item.children.filter((l) => l.trim().length > 0);
+                    const minChildIndent = nonEmpty.length
+                        ? Math.min(...nonEmpty.map((l) => leadingSpaces(l)))
+                        : baseIndent + 2;
+                    const dedentBy = Math.max(baseIndent + 1, Math.min(baseIndent + 4, minChildIndent));
+                    const dedented = item.children.map((l) => (l.trim() ? stripIndent(l, dedentBy) : ""));
+                    const innerLines = lead ? [lead, ...dedented] : dedented;
+                    let innerHtml = parseBlocks(innerLines, { inListItem: true });
+                    if (taskPrefix) {
+                        innerHtml = innerHtml.replace(/^<p>/, "<p>" + taskPrefix);
+                    }
+                    html += "<li" + (taskPrefix ? ' class="task-li"' : "") + ">" + innerHtml + "</li>";
+                }
+            }
+            html += "</" + listType + ">";
             continue;
         }
 
-        closeList();
-        paragraph.push(line);
+        paragraph.push(trimmed);
+        i++;
     }
 
     flushParagraph();
-    closeList();
-    flushQuote();
     return html;
+}
+
+function renderMarkdown(source) {
+    const normalized = String(source || "").replace(/\r\n?/g, "\n");
+    if (!normalized.trim()) return "";
+
+    let out = "";
+    let rest = normalized;
+
+    const thinkBlocks = [];
+    rest = rest.replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner) => {
+        if (inner.trim()) thinkBlocks.push({ open: false, text: inner.trim() });
+        return "";
+    });
+
+    const openIdx = rest.search(/<think>/i);
+    if (openIdx >= 0) {
+        const before = rest.slice(0, openIdx);
+        const thinkingNow = rest.slice(openIdx + 7).trim();
+        rest = before;
+        thinkBlocks.push({ open: true, text: thinkingNow });
+    }
+
+    for (const tb of thinkBlocks) {
+        const label = tb.open ? "Thinking…" : "Thought process";
+        const body = tb.text ? parseBlocks(tb.text.split("\n")) : '<p class="muted">Reasoning…</p>';
+        out += '<details class="think-box"' + (tb.open ? " open" : "") + '><summary class="think-summary">' + label + '</summary><div class="think-content">' + body + "</div></details>";
+    }
+
+    if (rest.trim()) {
+        out += parseBlocks(rest.split("\n"));
+    }
+    return out;
 }
 
 /* ==========================================================
