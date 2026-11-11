@@ -19,14 +19,15 @@ export class AfterworldState extends DurableObject {
 
   async load() {
     if (this.loaded) return;
-    const stored = await this.ctx.storage.get(["catalog", "stats", "observed", "requests", "agentOnly", "statUrls", "seeded"]);
-    this.catalog = stored.get("catalog") || { models: [], fetched_at: 0 };
+    const stored = await this.ctx.storage.get(["catalog", "stats", "observed", "requests", "agentOnly", "statUrls", "seeded", "seededIds"]);
+    this.catalog = stored.get("catalog") || { models: [], fetched_at: 0, schema: 0 };
     this.stats = stored.get("stats") || { results: {}, stats_at: 0 };
     this.observed = stored.get("observed") || {};
     this.requests = stored.get("requests") || [];
     this.agentOnly = stored.get("agentOnly") || {};
     this.statUrls = stored.get("statUrls") || {};
     this.seeded = stored.get("seeded") || false;
+    this.seededIds = new Set(stored.get("seededIds") || []);
     this.loaded = true;
   }
 
@@ -55,15 +56,27 @@ export class AfterworldState extends DurableObject {
     const now = Date.now() / 1000;
     let changed = this.pruneAgentOnly(now);
     // Like main.py's seed_known_agent_only(): hidden from the start, then re-checked after
-    // AGENT_ONLY_TTL like any other agent-only model (main.py re-seeds only on a restart).
-    if (!this.seeded) {
-      for (const id of seedAgentOnly) {
+    // AGENT_ONLY_TTL like any other agent-only model. Track per-id so newly discovered known
+    // agent-only ids get seeded once even on existing Durable Object storage.
+    let seededChanged = false;
+    for (const id of seedAgentOnly) {
+      if (!this.seededIds.has(id)) {
         this.agentOnly[id] ||= { reason: "Known to only work inside an agentic tool.", at: now };
+        this.seededIds.add(id);
+        seededChanged = true;
+        changed = true;
       }
+    }
+    if (!this.seeded) {
       this.seeded = true;
+      seededChanged = true;
       changed = true;
     }
-    if (changed) await this.ctx.storage.put({ agentOnly: this.agentOnly, seeded: true });
+    if (changed) {
+      const patch = { agentOnly: this.agentOnly, seeded: true };
+      if (seededChanged) patch.seededIds = [...this.seededIds];
+      await this.ctx.storage.put(patch);
+    }
     return {
       catalog: this.catalog,
       stats: this.stats,

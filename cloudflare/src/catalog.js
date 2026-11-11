@@ -3,7 +3,12 @@
 
 export const ROUTER_IDS = new Set(["openrouter/free", "openrouter/auto", "openrouter/bodybuilder"]);
 
-export const KNOWN_AGENT_ONLY_IDS = ["thinkingmachines/inkling:free", "thinkingmachines/inkling-small:free"];
+export const KNOWN_AGENT_ONLY_IDS = [
+  "thinkingmachines/inkling:free",
+  "thinkingmachines/inkling-small:free",
+  "thinkingmachines/inkling-2:free",
+  "thinkingmachines/inkling-2-small:free",
+];
 
 export const AGENT_ONLY_HINTS = [
   "agentic harness",
@@ -99,7 +104,7 @@ const PAIRED_PATTERNS = [
 
 const TOTAL_ONLY_PATTERNS = [
   new RegExp(NU + "[- ]" + ci("param")),
-  new RegExp(NU + String.raw`\s+` + ci("total") + String.raw`\s+` + ci("param")),
+  new RegExp(NU + String.raw`\s+(?:` + ci("total") + "|" + ci("backbone") + String.raw`)\s+` + ci("param")),
 ];
 
 const COMPARISON_WORDS = ["than", "outperform", "compared", "versus", " vs", "rival", "larger", "smaller", "beats", "surpass"];

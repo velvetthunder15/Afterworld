@@ -1,24 +1,30 @@
 // End-to-end test: runs the Worker with `wrangler dev` (real workerd runtime, real
 // Durable Object, real Static Assets) against the mock OpenRouter, and checks every route.
 // Usage: npm run test:integration
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { start, calls } from "./mock-openrouter.mjs";
 
 const WORKER_PORT = 8788;
 const BASE = "http://127.0.0.1:" + WORKER_PORT;
+const WORKER_CWD = fileURLToPath(new URL("..", import.meta.url));
+const WRANGLER_BIN = path.join(WORKER_CWD, "node_modules", "wrangler", "bin", "wrangler.js");
+const PERSIST_DIR = path.join(os.tmpdir(), "afterworld-test-state-" + Date.now());
 
 const mock = await start(0);
 const mockUrl = "http://127.0.0.1:" + mock.address().port;
 
 const wrangler = spawn(
-  "npx",
-  ["wrangler", "dev", "--config", "wrangler.test.jsonc", "--port", String(WORKER_PORT), "--ip", "127.0.0.1", "--persist-to", "/tmp/afterworld-test-state-" + Date.now(),
+  process.execPath,
+  [WRANGLER_BIN, "dev", "--config", "wrangler.test.jsonc", "--port", String(WORKER_PORT), "--ip", "127.0.0.1", "--persist-to", PERSIST_DIR,
    "--var", "OPENROUTER_BASE_URL:" + mockUrl, "--var", "OPENROUTER_API_KEY:test-key", "--var", "WORKERS_AI_ENABLED:false",
    "--var", "GROQ_BASE_URL:" + mockUrl + "/groq", "--var", "GROQ_API_KEY:groq-key",
    "--var", "SAMBANOVA_BASE_URL:" + mockUrl + "/sambanova", "--var", "SAMBANOVA_API_KEY:samba-key",
    "--var", "MISTRAL_BASE_URL:" + mockUrl + "/mistral", "--var", "MISTRAL_API_KEY:mistral-key", "--log-level", "warn"],
-  { cwd: new URL("..", import.meta.url).pathname, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" } }
+  { cwd: WORKER_CWD, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" } }
 );
 let logs = "";
 wrangler.stdout.on("data", (d) => (logs += d));
@@ -79,10 +85,18 @@ try {
     assert.match(await r.text(), /Afterworld/);
   });
 
-  await test("GET /static/index.html still works", async () => {
+  await test("GET /static/index.html, /static/styles.css and /static/app.js work with no-store", async () => {
     const r = await fetch(BASE + "/static/index.html");
     assert.equal(r.status, 200);
     assert.match(await r.text(), /<html/i);
+    const css = await fetch(BASE + "/static/styles.css?v=2.0.0");
+    assert.equal(css.status, 200);
+    assert.match(css.headers.get("content-type") || "", /text\/css/);
+    assert.match(css.headers.get("cache-control") || "", /no-store/);
+    const js = await fetch(BASE + "/static/app.js?v=2.0.0");
+    assert.equal(js.status, 200);
+    assert.match(js.headers.get("content-type") || "", /javascript/);
+    assert.match(js.headers.get("cache-control") || "", /no-store/);
   });
 
   let catalog;
@@ -92,7 +106,7 @@ try {
     catalog = await r.json();
     assert.equal(catalog.models.filter((m) => m.host === "openrouter").length, 8);
     assert.ok(!catalog.models.some((m) => m.id === "mock/paid"));
-    assert.equal(catalog.version, "1.1.1");
+    assert.equal(catalog.version, "2.0.0");
     assert.deepEqual(Object.keys(catalog.groupings).sort(), ["context", "host", "input", "provider", "quality", "size"]);
     const ok = catalog.models.find((m) => m.id === "mock/ok");
     assert.equal(ok.params_label, "7B");
@@ -169,6 +183,7 @@ try {
     const r = await fetch(BASE + "/chat", { method: "POST", headers: { "Content-Type": "application/json", "Accept-Encoding": "gzip, br" }, body: JSON.stringify({ model: "mock/ok", messages: say("Hello") }) });
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("x-model"), "mock/ok");
+    assert.match(r.headers.get("x-ttft-ms") || "", /^\d+$/);
     assert.match(r.headers.get("content-type"), /text\/plain/);
     const { text, pieces } = await readStream(r);
     assert.equal(text, "Hello there, this is a streamed reply.");
@@ -294,8 +309,7 @@ try {
     assert.match(data.message, /provider is rate limited/);
   });
 
-  await test("GET /api/live merges OpenRouter stats with live measurements", async () => {
-    await new Promise((r) => setTimeout(r, 300)); // let the background save finish
+  await test("GET /api/live merges OpenRouter stats with live measurements immediately", async () => {
     const r = await fetch(BASE + "/api/live");
     assert.equal(r.status, 200);
     const live = await r.json();
@@ -304,9 +318,19 @@ try {
     assert.equal(live.models["mock/slow-first"].latency_ms, 300); // 0.3 s from the stats, scaled to ms
     assert.equal(live.models["mock/slow-first"].latency_source, "openrouter");
     assert.equal(live.models["mock/upstream-429"].state, "throttled");
+    assert.ok(Array.isArray(live.providers) && live.providers.length === 4);
+    assert.equal(live.catalog_count, 10);
     assert.ok(live.usage.minute >= 10, "usage counter " + JSON.stringify(live.usage));
     assert.ok(live.usage.day >= live.usage.minute);
     assert.ok(live.stats_at);
+  });
+
+  await test("POST /chat supports optional custom system prompt", async () => {
+    const r = await post("/chat", { model: "mock/ok", system: "Reply concisely.", messages: say("Hello") });
+    assert.equal(r.status, 200);
+    await readStream(r);
+    const sent = chatCalls("mock/ok").at(-1);
+    assert.deepEqual(sent.body.messages[0], { role: "system", content: "Reply concisely." });
   });
 
   await test("POST /api/random-model picks a fast model that answers", async () => {
@@ -330,7 +354,11 @@ try {
     assert.equal(ok.status, 200); // the Worker is still healthy
   });
 } finally {
-  try { process.kill(-wrangler.pid, "SIGTERM"); } catch {}  // the whole group, so workerd stops too
+  if (process.platform === "win32") {
+    try { spawnSync("taskkill", ["/PID", String(wrangler.pid), "/T", "/F"], { stdio: "ignore" }); } catch {}
+  } else {
+    try { process.kill(-wrangler.pid, "SIGTERM"); } catch {} // the whole group, so workerd stops too
+  }
   mock.close();
 }
 

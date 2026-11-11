@@ -110,7 +110,7 @@ const MAKERS = {
   moonshotai: "MoonshotAI", "z-ai": "Z.ai", zai: "Z.ai", ibm: "IBM", "ibm-granite": "IBM",
   microsoft: "Microsoft", nvidia: "NVIDIA", minimax: "MiniMax", sdaia: "SDAIA", unknown: "Other",
   "zai-org": "Z.ai", cloudflare: "Cloudflare", "swiss-ai": "Swiss AI", "utter-project": "UTTER Project",
-  "daily-co": "Daily", "ibm-granite": "IBM", aisingapore: "AI Singapore", tencent: "Tencent", "aisingapore": "AI Singapore",
+  "daily-co": "Daily", aisingapore: "AI Singapore", tencent: "Tencent",
 };
 
 const MAKER_KEYS = {
@@ -155,6 +155,9 @@ function prettyName(rawId) {
     .replace(/\bA(\d+(?:\.\d+)?)b\b/gi, "A$1B")
     .replace(/\bIt\b/g, "IT")
     .replace(/\bGlm\b/g, "GLM")
+    .replace(/\bQwq\b/g, "QwQ")
+    .replace(/\bVl\b/g, "VL")
+    .replace(/\bMoe\b/g, "MoE")
     .replace(/\bDeepseek\b/g, "DeepSeek")
     .replace(/\bEurollm\b/g, "EuroLLM")
     .replace(/\bPhonellm\b/g, "PhoneLLM")
@@ -282,7 +285,7 @@ export function parseMistralModels(payload, today = new Date().toISOString().sli
 }
 
 // Workers AI: env.AI.models() returns the catalog with a list of properties per model.
-export function parseWorkersAiModels(list, today = new Date().toISOString().slice(0, 10)) {
+export function parseWorkersAiModels(list, today = new Date().toISOString().slice(0, 10), { paidPlan = false } = {}) {
   const models = [];
   for (const m of list || []) {
     if (!m || typeof m.name !== "string") continue;
@@ -293,8 +296,10 @@ export function parseWorkersAiModels(list, today = new Date().toISOString().slic
     const props = {};
     for (const p of m.properties || []) props[p.property_id] = p.value;
     if (props.planned_deprecation_date && String(props.planned_deprecation_date).slice(0, 10) <= today) continue;
-    if (String(props.lora) === "true" || notChat(m.name)) continue;
-    const vision = /vision|llama-4-scout/i.test(m.name);
+    if (!paidPlan && String(props.require_workers_paid) === "true") continue;
+    if (notChat(m.name)) continue;
+    const vision = String(props.vision) === "true" || /vision|llama-4-scout/i.test(m.name);
+    const reasoning = String(props.reasoning) === "true" || /deepseek-r1|qwq|reasoning|gpt-oss|qwen3/i.test(m.name);
     models.push(buildHostModel("workersai", {
       rawId: m.name,
       name: prettyName(m.name),
@@ -302,8 +307,9 @@ export function parseWorkersAiModels(list, today = new Date().toISOString().slic
       context: props.context_window || props.max_input_tokens,
       maxOutput: props.max_total_tokens ? null : props.max_output_tokens,
       inputs: vision ? ["text", "image"] : ["text"],
-      reasoning: /deepseek-r1|qwq|reasoning|gpt-oss|qwen3/i.test(m.name),
+      reasoning,
       tools: String(props.function_calling) === "true",
+      hfId: props.hugging_face_id || "",
     }));
   }
   return models;

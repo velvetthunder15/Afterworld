@@ -1,4 +1,8 @@
 /
-  Cache-Control: no-store
+  Cache-Control: no-store, no-cache, must-revalidate
 /index.html
-  Cache-Control: no-store
+  Cache-Control: no-store, no-cache, must-revalidate
+/styles.css
+  Cache-Control: no-store, no-cache, must-revalidate
+/app.js
+  Cache-Control: no-store, no-cache, must-revalidate

@@ -80,7 +80,7 @@ FREE_LIMITS = {
     "credits_threshold": 10,
 }
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "2.0.0"
 
 SYSTEM_PROMPT = "You are a helpful chatbot."
 MAX_TOKENS_CAP = 4096     # longest reply we ask for (lower if the model's own limit is lower)
@@ -107,6 +107,8 @@ ROUTER_IDS = {"openrouter/free", "openrouter/auto", "openrouter/bodybuilder"}
 KNOWN_AGENT_ONLY_IDS = {
     "thinkingmachines/inkling:free",
     "thinkingmachines/inkling-small:free",
+    "thinkingmachines/inkling-2:free",
+    "thinkingmachines/inkling-2-small:free",
 }
 AGENT_ONLY_HINTS = (
     "agentic harness",
@@ -253,8 +255,8 @@ _PAIRED_PATTERNS = [
 _TOTAL_ONLY_PATTERNS = [
     # "120B-parameter", "12-billion-parameter", "2.4 trillion-parameter"
     re.compile(_NU + r"[- ](?i:param)"),
-    # "2.4 trillion total parameters"
-    re.compile(_NU + r"\s+(?i:total\s+param)"),
+    # "2.4 trillion total parameters", "552B backbone parameters"
+    re.compile(_NU + r"\s+(?i:(?:total|backbone)\s+param)"),
 ]
 
 _COMPARISON_WORDS = (
@@ -400,6 +402,8 @@ def is_expired(entry, today):
 def is_chat_model(entry):
     model_id = entry.get("id") or ""
     if not model_id or model_id.startswith("~") or model_id in ROUTER_IDS:
+        return False
+    if re.match(r"^google/lyria[-/]", model_id, re.I):
         return False
     if entry.get("alias_target"):
         return False
@@ -1048,6 +1052,90 @@ def iso(timestamp):
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
 
+def _build_provider_status(models, stats, observed, now):
+    usage = usage_snapshot(now)
+    fastest_obs = [
+        m for m in models
+        if observed.get(m["id"], {}).get("at", 0) > now - MEASURED_MAX_AGE
+        and observed.get(m["id"], {}).get("ms") is not None
+    ]
+    fastest_obs.sort(key=lambda m: observed[m["id"]]["ms"])
+    fastest = None
+    if fastest_obs:
+        top = fastest_obs[0]
+        fastest = {
+            "id": top["id"],
+            "name": top["name"],
+            "latency_ms": observed[top["id"]]["ms"],
+            "source": "measured",
+            "age_s": max(0, round(now - observed[top["id"]]["at"])),
+        }
+    else:
+        stat_candidates = [
+            m for m in models
+            if (stats.get(m["id"]) or {}).get("healthy", True)
+            and (stats.get(m["id"]) or {}).get("latency") is not None
+        ]
+        stat_candidates.sort(key=lambda m: stats[m["id"]]["latency"])
+        if stat_candidates:
+            top = stat_candidates[0]
+            fastest = {
+                "id": top["id"],
+                "name": top["name"],
+                "latency_ms": stats[top["id"]]["latency"],
+                "source": "openrouter",
+                "age_s": None,
+            }
+
+    healthy_count = 0
+    throttled_count = 0
+    for m in models:
+        st = live_info(stats.get(m["id"]), observed.get(m["id"], {}), now)["state"]
+        if st == "throttled":
+            throttled_count += 1
+        elif st == "healthy":
+            healthy_count += 1
+
+    return [{
+        "key": "openrouter",
+        "name": "OpenRouter",
+        "limit_per_min": FREE_LIMITS["per_minute"],
+        "limit_per_day": None,
+        "scope": "account",
+        "quota_label": "20 req/min shared (:free)",
+        "source": "https://openrouter.ai/collections/free-models/",
+        "model_count": len(models),
+        "healthy_count": healthy_count,
+        "throttled_count": throttled_count,
+        "usage": {
+            "minute": usage["minute"],
+            "day": usage["day"],
+            "free_minute": usage["minute"],
+        },
+        "models": {},
+        "fastest": fastest,
+    }]
+
+
+@app.get("/api/status")
+def api_status():
+    try:
+        load_catalog()
+    except CatalogError as error:
+        raise HTTPException(status_code=502, detail=str(error))
+
+    models = list_models()
+    now = time.time()
+    with _lock:
+        observed = {key: dict(value) for key, value in _observed.items()}
+        stats = dict(_state["stats"])
+
+    return {
+        "providers": _build_provider_status(models, stats, observed, now),
+        "updated_at": iso(now),
+    }
+
+
 @app.get("/api/live")
 def api_live():
     """Live numbers for the dashboard: speed and health per model, plus our request counter."""
@@ -1056,6 +1144,7 @@ def api_live():
     except CatalogError as error:
         raise HTTPException(status_code=502, detail=str(error))
 
+    hidden = agent_only_ids()
     models = list_models()
     stats = refresh_stats(models)
     now = time.time()
@@ -1063,6 +1152,7 @@ def api_live():
     with _lock:
         observed = {key: dict(value) for key, value in _observed.items()}
         stats_at = _state["stats_at"]
+        all_ids = {model["id"] for model in _state["models"]}
 
     return {
         "updated_at": iso(now),
@@ -1071,8 +1161,13 @@ def api_live():
             model["id"]: live_info(stats.get(model["id"]), observed.get(model["id"], {}), now)
             for model in models
         },
+        "providers": _build_provider_status(models, stats, observed, now),
         "usage": usage_snapshot(now),
         "limits": dict(FREE_LIMITS),
+        "catalog_count": len(models),
+        "excluded_agent_only": len(hidden & all_ids),
+        "excluded_paid": 0,
+        "version": APP_VERSION,
     }
 
 
@@ -1117,6 +1212,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     model: str
     messages: List[Message]
+    system: str = ""
 
 
 def message_content(text, images):
@@ -1132,7 +1228,7 @@ def message_content(text, images):
     return parts
 
 
-def build_messages(items):
+def build_messages(items, custom_system=""):
     """Turn the chat history sent by the browser into a clean message list."""
     cleaned = []
 
@@ -1157,7 +1253,8 @@ def build_messages(items):
     while cleaned and cleaned[0]["role"] != "user":
         cleaned.pop(0)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    prompt = (custom_system or "").strip()[:2000] or SYSTEM_PROMPT
+    messages = [{"role": "system", "content": prompt}]
     for entry in cleaned:
         messages.append({
             "role": entry["role"],
@@ -1306,8 +1403,9 @@ def open_stream(model, messages):
             token, first_at = first_token(iterator)
 
             if token is not None:
-                record_success(model["id"], round((first_at - started) * 1000))
-                return token, iterator, stream
+                ttft_ms = round((first_at - started) * 1000)
+                record_success(model["id"], ttft_ms)
+                return token, iterator, stream, ttft_ms
 
             stream.close()
             last_message = "The model returned an empty reply. Try again or choose another model."
@@ -1386,13 +1484,13 @@ def chat(data: ChatRequest):
 
     model = require_free_model(data.model)
     check_images(data.messages, model)
-    messages = build_messages(data.messages)
+    messages = build_messages(data.messages, data.system)
 
     if len(messages) < 2:
         raise HTTPException(status_code=400, detail="Type a message first.")
 
     try:
-        token, iterator, stream = open_stream(model, messages)
+        token, iterator, stream, ttft_ms = open_stream(model, messages)
     except ModelUnavailable as error:
         raise HTTPException(status_code=503, detail=error.message)
 
@@ -1421,6 +1519,8 @@ def chat(data: ChatRequest):
         media_type="text/plain",
         headers={
             "X-Model": model["id"],
+            "X-TTFT-Ms": str(ttft_ms),
+            "Access-Control-Expose-Headers": "X-Model, X-TTFT-Ms",
             "Cache-Control": "no-store"
         }
     )

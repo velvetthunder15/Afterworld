@@ -50,7 +50,8 @@ const MEASURED_MAX_AGE = 1800;
 
 const FREE_LIMITS = { per_minute: 20, per_day: 50, per_day_with_credits: 1000, credits_threshold: 10 };
 
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "2.0.0";
+const CATALOG_SCHEMA = 2;
 
 const SYSTEM_PROMPT = "You are a helpful chatbot.";
 const MAX_TOKENS_CAP = 4096;
@@ -183,7 +184,8 @@ async function fetchHostModels(ctx, key) {
       env.AI.models({ task: "Text Generation", per_page: 200, hide_experimental: true }),
       sleep(15).then(() => { throw new Error("timed out"); }),
     ]);
-    return parseWorkersAiModels(list);
+    const paidPlan = String(env.WORKERS_PAID ?? "").toLowerCase() === "true";
+    return parseWorkersAiModels(list, undefined, { paidPlan });
   }
   const response = await fetch(hostBase(env, key) + "/models", {
     headers: { Accept: "application/json", Authorization: "Bearer " + hostKey(env, key), "User-Agent": "Afterworld/1.0" },
@@ -201,7 +203,8 @@ async function loadCatalog(ctx, force = false) {
   const snap = await ctx.load();
   const age = now() - snap.catalog.fetched_at;
   const have = snap.catalog.models.length > 0;
-  if (have && age < MODELS_TTL && !(force && age >= REFRESH_MIN_AGE)) return;
+  const schemaOk = snap.catalog.schema === CATALOG_SCHEMA;
+  if (have && schemaOk && age < MODELS_TTL && !(force && age >= REFRESH_MIN_AGE)) return;
 
   // Every host is fetched at once. A host that fails keeps the models it had last time,
   // so one host being down never empties the list.
@@ -212,7 +215,7 @@ async function loadCatalog(ctx, force = false) {
     sources.map(([key, load]) => load().then((models) => [key, models, null], (error) => [key, null, error]))
   );
 
-  const previous = snap.catalog.models;
+  const previous = schemaOk ? snap.catalog.models : [];
   const merged = [];
   let fresh = 0;
   for (const [key, models, error] of results) {
@@ -238,7 +241,7 @@ async function loadCatalog(ctx, force = false) {
     for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
     return 0;
   });
-  snap.catalog = { models: merged, fetched_at: now() };
+  snap.catalog = { models: merged, fetched_at: now(), schema: CATALOG_SCHEMA };
   await ctx.state.putCatalog(snap.catalog);
 }
 
@@ -330,12 +333,7 @@ function median(values) {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-async function refreshStats(ctx, models) {
-  const snap = await ctx.load();
-  if (Object.keys(snap.stats.results).length && now() - snap.stats.stats_at < STATS_TTL) {
-    return { ...snap.stats.results };
-  }
-
+async function collectStats(ctx, snap, models) {
   const results = {};
   const found = {};
   // Every model is checked at the same time; whatever has not answered after
@@ -360,8 +358,23 @@ async function refreshStats(ctx, models) {
   }
 
   snap.stats = { results: snapshot, stats_at: now() };
-  ctx.execCtx.waitUntil(ctx.state.putStats(snap.stats, found).catch((e) => log("could not save stats:", String(e))));
+  await ctx.state.putStats(snap.stats, found).catch((e) => log("could not save stats:", String(e)));
   return { ...snapshot };
+}
+
+async function refreshStats(ctx, models, { wait = false } = {}) {
+  const snap = await ctx.load();
+  const have = Object.keys(snap.stats.results).length > 0;
+  if (have && now() - snap.stats.stats_at < STATS_TTL) {
+    return { ...snap.stats.results };
+  }
+  // When previous stats exist and caller does not need a blocking wait, serve cached
+  // stats immediately and refresh OpenRouter medians in the background.
+  if (have && !wait) {
+    ctx.execCtx.waitUntil(collectStats(ctx, snap, models).catch((e) => log("bg stats refresh failed:", String(e))));
+    return { ...snap.stats.results };
+  }
+  return collectStats(ctx, snap, models);
 }
 
 // ---------------------------------------------------------------------------
@@ -485,16 +498,30 @@ function shuffle(list) {
   return list;
 }
 
-async function pickRandomFast(ctx) {
+async function pickRandomFast(ctx, hostFilter = null) {
   await loadCatalog(ctx);
   const snap = await ctx.load();
-  const models = listModels(snap);
-  const stats = await refreshStats(ctx, models);
+  const allModels = listModels(snap);
+  const models = hostFilter && hostFilter !== "all"
+    ? allModels.filter((m) => (m.host || "openrouter") === hostFilter)
+    : allModels;
+  if (!models.length) {
+    throw new ModelUnavailable("No free models are currently available for that host.");
+  }
+  const stats = await refreshStats(ctx, allModels);
+  const t = now();
 
+  const speedOf = (m) => {
+    if (hostFilter && hostFilter !== "all") {
+      const obs = snap.observed[m.id];
+      if (obs && obs.ms != null && obs.at && t - obs.at < MEASURED_MAX_AGE) return obs.ms;
+    }
+    return stats[m.id]?.latency ?? null;
+  };
   const info = (m) => stats[m.id] || { latency: null, healthy: true };
 
   let healthy = models.filter((m) => info(m).healthy && !atKnownLimit(snap, m));
-  const ranked = healthy.filter((m) => info(m).latency !== null).sort((a, b) => info(a).latency - info(b).latency);
+  const ranked = healthy.filter((m) => speedOf(m) !== null).sort((a, b) => speedOf(a) - speedOf(b));
 
   const tried = new Set();
 
@@ -505,7 +532,7 @@ async function pickRandomFast(ctx) {
       tried.add(model.id);
       const result = await probeModel(ctx, model.id);
       if (result.ok) {
-        const note = "Picked at random from the " + pool.length + " fastest free models by OpenRouter's recent " +
+        const note = "Picked at random from the " + pool.length + " fastest free models by recent " +
           "latency stats, and confirmed just now (" + result.ms + " ms to first output).";
         return [model, result.ms, "stats", note];
       }
@@ -538,8 +565,11 @@ async function pickRandomFast(ctx) {
 function validateChatBody(body) {
   const bad = () => new HttpError(422, "The request wasn't in the expected format.");
   if (!body || typeof body !== "object" || typeof body.model !== "string" || !Array.isArray(body.messages)) throw bad();
+  if (body.system !== undefined && body.system !== null && typeof body.system !== "string") throw bad();
+  const system = typeof body.system === "string" ? body.system.trim().slice(0, 2000) : "";
   return {
     model: body.model,
+    system,
     messages: body.messages.map((item) => {
       if (!item || typeof item !== "object" || !["user", "assistant"].includes(item.role)) throw bad();
       const content = item.content === undefined ? "" : item.content;
@@ -558,7 +588,7 @@ function messageContent(text, images) {
   return parts;
 }
 
-function buildMessages(items) {
+function buildMessages(items, customSystem = "") {
   let cleaned = [];
   for (const item of items) {
     const text = item.content.trim();
@@ -577,7 +607,8 @@ function buildMessages(items) {
   cleaned = cleaned.slice(-MAX_HISTORY);
   while (cleaned.length && cleaned[0].role !== "user") cleaned.shift();
 
-  return [{ role: "system", content: SYSTEM_PROMPT }].concat(
+  const prompt = customSystem || SYSTEM_PROMPT;
+  return [{ role: "system", content: prompt }].concat(
     cleaned.map((e) => ({ role: e.role, content: messageContent(e.text, e.images) }))
   );
 }
@@ -685,8 +716,9 @@ async function openStream(ctx, model, messages, signal) {
       const iterator = stream.chunks[Symbol.asyncIterator]();
       const [token, firstAt] = await firstToken(iterator);
       if (token !== null) {
-        ctx.recordSuccess(model.id, Math.round(firstAt - started));
-        return [token, iterator, stream];
+        const ttftMs = Math.round(firstAt - started);
+        ctx.recordSuccess(model.id, ttftMs);
+        return [token, iterator, stream, ttftMs];
       }
       stream.close();
       lastMessage = "The model returned an empty reply. Try again or choose another model.";
@@ -794,26 +826,28 @@ async function apiModels(ctx, url) {
   });
 }
 
-async function apiRandomModel(ctx) {
+async function apiRandomModel(ctx, request) {
+  const body = await request.json().catch(() => null);
+  const hostFilter = body && typeof body === "object" && typeof body.host === "string" ? body.host : null;
   try {
-    const [model, ms, mode, note] = await pickRandomFast(ctx);
+    const [model, ms, mode, note] = await pickRandomFast(ctx, hostFilter);
+    await ctx.flush();
     return json({ model: publicModel(model), measured_ms: ms, mode, note });
   } catch (error) {
+    await ctx.flush();
     if (error instanceof CatalogError) throw new HttpError(502, error.message);
     if (error instanceof ModelUnavailable) throw new HttpError(503, error.message);
     throw error;
-  } finally {
-    ctx.flushLater();
   }
 }
 
 // Only enforce published limits when they are known for this specific account.
 const PROVIDER_LIMITS = {
-  openrouter: { limit_per_min: 20, limit_per_day: null, scope: "account", source: "https://openrouter.ai/collections/free-models/" },
-  groq: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://console.groq.com/docs/rate-limits" },
-  sambanova: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://docs.sambanova.ai/" },
-  mistral: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://docs.mistral.ai/admin/billing-usage/usage-limits" },
-  workersai: { limit_per_min: null, limit_per_day: null, scope: "model", source: "https://developers.cloudflare.com/workers-ai/platform/limits/" },
+  openrouter: { limit_per_min: 20, limit_per_day: null, scope: "account", quota_label: "20 req/min shared (:free)", source: "https://openrouter.ai/collections/free-models/" },
+  groq: { limit_per_min: null, limit_per_day: null, scope: "model", quota_label: "Per-model free tier", source: "https://console.groq.com/docs/rate-limits" },
+  sambanova: { limit_per_min: null, limit_per_day: null, scope: "model", quota_label: "Per-model free tier", source: "https://docs.sambanova.ai/" },
+  mistral: { limit_per_min: null, limit_per_day: null, scope: "model", quota_label: "Monthly free plan", source: "https://docs.mistral.ai/admin/billing-usage/usage-limits" },
+  workersai: { limit_per_min: null, limit_per_day: null, scope: "model", quota_label: "10,000 Neurons/day shared", source: "https://developers.cloudflare.com/workers-ai/platform/limits/" },
 };
 function atKnownLimit(snap, model) {
   const host = model.host || "openrouter";
@@ -822,22 +856,75 @@ function atKnownLimit(snap, model) {
   const minute = requests.filter((r) => r.host === host && (host !== "openrouter" || r.model.endsWith(":free")) && (config.scope === "account" || r.model === model.id) && r.at > now() - 60).length;
   return (config.limit_per_min != null && minute >= config.limit_per_min && (host !== "openrouter" || model.id.endsWith(":free"))) || (snap.observed[model.id]?.throttled_at > now() - 60);
 }
+
+function buildProviderStatus(ctx, snap, models, stats, t) {
+  const midnight = t - (t % 86400);
+  return ["openrouter", ...enabledHosts(ctx.env)].map((key) => {
+    const hostModels = models.filter((m) => (m.host || "openrouter") === key);
+    const records = (snap.providerRequests || []).filter((r) => r.host === key);
+    const byModel = {};
+    for (const r of records) {
+      const entry = (byModel[r.model] ||= { minute: 0, day: 0 });
+      if (r.at > t - 60) entry.minute++;
+      if (r.at >= midnight) entry.day++;
+    }
+    const measuredFastest = hostModels
+      .filter((m) => snap.observed[m.id]?.at > t - MEASURED_MAX_AGE && snap.observed[m.id]?.ms != null && !atKnownLimit(snap, m))
+      .sort((a, b) => snap.observed[a.id].ms - snap.observed[b.id].ms)[0];
+    let fastest = null;
+    if (measuredFastest) {
+      fastest = {
+        id: measuredFastest.id,
+        name: measuredFastest.name,
+        latency_ms: snap.observed[measuredFastest.id].ms,
+        source: "measured",
+        age_s: Math.max(0, Math.round(t - snap.observed[measuredFastest.id].at)),
+      };
+    } else if (stats && key === "openrouter") {
+      const statFastest = hostModels
+        .filter((m) => stats[m.id]?.healthy !== false && stats[m.id]?.latency != null && !atKnownLimit(snap, m))
+        .sort((a, b) => stats[a.id].latency - stats[b.id].latency)[0];
+      if (statFastest) {
+        fastest = {
+          id: statFastest.id,
+          name: statFastest.name,
+          latency_ms: stats[statFastest.id].latency,
+          source: "openrouter",
+          age_s: null,
+        };
+      }
+    }
+    let healthyCount = 0;
+    let throttledCount = 0;
+    for (const m of hostModels) {
+      const info = liveInfo(stats ? stats[m.id] : snap.stats.results[m.id], snap.observed[m.id] || {}, t);
+      if (info.state === "throttled") throttledCount++;
+      else if (info.state === "healthy") healthyCount++;
+    }
+    return {
+      key,
+      name: hostLabel(key),
+      ...PROVIDER_LIMITS[key],
+      model_count: hostModels.length,
+      healthy_count: healthyCount,
+      throttled_count: throttledCount,
+      usage: {
+        minute: records.filter((r) => r.at > t - 60).length,
+        day: records.filter((r) => r.at >= midnight).length,
+        free_minute: records.filter((r) => r.model.endsWith(":free") && r.at > t - 60).length,
+      },
+      models: byModel,
+      fastest,
+    };
+  });
+}
+
 async function apiStatus(ctx) {
   await loadCatalog(ctx);
   const snap = await ctx.load();
   const models = listModels(snap);
-  const t = now(), midnight = t - (t % 86400);
-  const providers = ["openrouter", ...enabledHosts(ctx.env)].map((key) => {
-    const records = (snap.providerRequests || []).filter((r) => r.host === key);
-    const byModel = {};
-    for (const r of records) {
-      const entry = byModel[r.model] ||= { minute: 0, day: 0 };
-      if (r.at > t - 60) entry.minute++;
-      if (r.at >= midnight) entry.day++;
-    }
-    const fastest = models.filter((m) => (m.host || "openrouter") === key && snap.observed[m.id]?.at > t - MEASURED_MAX_AGE && !atKnownLimit(snap, m)).sort((a,b) => snap.observed[a.id].ms - snap.observed[b.id].ms)[0];
-    return { key, name: hostLabel(key), ...PROVIDER_LIMITS[key], usage: { minute: records.filter((r) => r.at > t - 60).length, day: records.filter((r) => r.at >= midnight).length, free_minute: records.filter((r) => r.model.endsWith(":free") && r.at > t - 60).length }, models: byModel, fastest: fastest ? { id: fastest.id, name: fastest.name, latency_ms: snap.observed[fastest.id].ms } : null };
-  });
+  const t = now();
+  const providers = buildProviderStatus(ctx, snap, models, snap.stats.results, t);
   return json({ providers, updated_at: iso(t) });
 }
 
@@ -849,6 +936,8 @@ async function apiLive(ctx) {
     throw error;
   }
   const snap = await ctx.load();
+  const hidden = agentOnlyIds(snap);
+  const allIds = new Set(snap.catalog.models.map((m) => m.id));
   const models = listModels(snap);
   const stats = await refreshStats(ctx, models);
   const t = now();
@@ -857,8 +946,13 @@ async function apiLive(ctx) {
     updated_at: iso(t),
     stats_at: snap.stats.stats_at ? iso(snap.stats.stats_at) : null,
     models: Object.fromEntries(models.map((m) => [m.id, liveInfo(stats[m.id], snap.observed[m.id] || {}, t)])),
+    providers: buildProviderStatus(ctx, snap, models, stats, t),
     usage: snap.usage,
     limits: { ...FREE_LIMITS },
+    catalog_count: models.length,
+    excluded_agent_only: [...hidden].filter((id) => allIds.has(id) && !String(snap.agentOnly[id]?.reason || "").startsWith("paid:")).length,
+    excluded_paid: [...hidden].filter((id) => allIds.has(id) && String(snap.agentOnly[id]?.reason || "").startsWith("paid:")).length,
+    version: APP_VERSION,
   });
 }
 
@@ -866,40 +960,44 @@ async function apiProbe(ctx, request) {
   const body = await request.json().catch(() => null);
   if (!body || typeof body.model !== "string") throw new HttpError(422, "The request wasn't in the expected format.");
   const model = await requireFreeModel(ctx, body.model);
-  try {
-    const result = await probeModel(ctx, model.id);
-    let message;
-    if (result.ok) message = model.name + " answered in " + result.ms + " ms.";
-    else if (result.paid) message = model.name + " needs a paid plan on " + model.host_label + ", so it has been removed from the list.";
-    else if (result.agent_only) message = model.name + " only works inside an agentic tool, so it has been removed from the list.";
-    else if (result.throttled && model.host && model.host !== "openrouter") message = model.host_label + " is rate limited. Retry time unavailable; try again later.";
-    else if (result.throttled) message = result.upstream ? model.name + "'s provider is rate limited right now." : accountLimitSentence();
-    else message = model.name + " didn't answer.";
+  const result = await probeModel(ctx, model.id);
+  await ctx.flush();
 
-    return json({
-      ok: result.ok,
-      ms: result.ms ?? null,
-      throttled: Boolean(result.throttled),
-      agent_only: Boolean(result.agent_only),
-      message,
-    });
-  } finally {
-    ctx.flushLater();
-  }
+  let message;
+  if (result.ok) message = model.name + " answered in " + result.ms + " ms.";
+  else if (result.paid) message = model.name + " needs a paid plan on " + model.host_label + ", so it has been removed from the list.";
+  else if (result.agent_only) message = model.name + " only works inside an agentic tool, so it has been removed from the list.";
+  else if (result.throttled && model.host && model.host !== "openrouter") message = model.host_label + " is rate limited. Retry time unavailable; try again later.";
+  else if (result.throttled) message = result.upstream ? model.name + "'s provider is rate limited right now." : accountLimitSentence();
+  else message = model.name + " didn't answer.";
+
+  const snap = await ctx.load();
+  const t = now();
+  return json({
+    ok: result.ok,
+    ms: result.ms ?? null,
+    throttled: Boolean(result.throttled),
+    agent_only: Boolean(result.agent_only),
+    paid: Boolean(result.paid),
+    removed: Boolean(result.agent_only || result.paid),
+    live: liveInfo(snap.stats.results[model.id], snap.observed[model.id] || {}, t),
+    message,
+  });
 }
 
 async function chat(ctx, request) {
   const body = validateChatBody(await request.json().catch(() => null));
   const model = await requireFreeModel(ctx, body.model);
   checkImages(body.messages, model);
-  const messages = buildMessages(body.messages);
+  const messages = buildMessages(body.messages, body.system);
   if (messages.length < 2) throw new HttpError(400, "Type a message first.");
 
-  let token, iterator, stream;
+  let token, iterator, stream, ttftMs;
   try {
-    [token, iterator, stream] = await openStream(ctx, model, messages, request.signal);
+    [token, iterator, stream, ttftMs] = await openStream(ctx, model, messages, request.signal);
+    await ctx.flush();
   } catch (error) {
-    ctx.flushLater();
+    await ctx.flush();
     if (error instanceof ModelUnavailable) throw new HttpError(503, error.message);
     throw error;
   }
@@ -928,6 +1026,10 @@ async function chat(ctx, request) {
         }
       } catch (error) {
         stream.close();
+        if (error instanceof ApiError && error.status === 429) {
+          ctx.recordThrottle(model.id);
+          ctx.flushLater();
+        }
         if (!request.signal?.aborted) {
           controller.enqueue(encoder.encode("\n\n[Reply interrupted: " + describeError(error, model.name, model.host) + "]"));
         }
@@ -939,11 +1041,12 @@ async function chat(ctx, request) {
     },
   });
 
-  ctx.flushLater();
   return new Response(body$, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Model": model.id,
+      "X-TTFT-Ms": String(ttftMs ?? ""),
+      "Access-Control-Expose-Headers": "X-Model, X-TTFT-Ms",
       // Without these, Cloudflare gzips text/plain, which buffers the reply and
       // breaks word-by-word streaming
       "Cache-Control": "no-store, no-transform",
@@ -951,6 +1054,17 @@ async function chat(ctx, request) {
       "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+async function serveAsset(env, request) {
+  const res = await env.ASSETS.fetch(request);
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("text/html") || ct.includes("javascript") || ct.includes("text/css")) {
+    const headers = new Headers(res.headers);
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  }
+  return res;
 }
 
 async function route(request, env, execCtx) {
@@ -962,7 +1076,7 @@ async function route(request, env, execCtx) {
   if (pathname === "/api/models" && method === "GET") return apiModels(ctx, url);
   if (pathname === "/api/status" && method === "GET") return apiStatus(ctx);
   if (pathname === "/api/live" && method === "GET") return apiLive(ctx);
-  if (pathname === "/api/random-model" && method === "POST") return apiRandomModel(ctx);
+  if (pathname === "/api/random-model" && method === "POST") return apiRandomModel(ctx, request);
   if (pathname === "/api/probe" && method === "POST") return apiProbe(ctx, request);
   if (pathname === "/chat" && method === "POST") return chat(ctx, request);
   if (["/api/models", "/api/status", "/api/live", "/api/random-model", "/api/probe", "/chat"].includes(pathname)) {
@@ -973,10 +1087,10 @@ async function route(request, env, execCtx) {
   if (pathname.startsWith("/static/")) {
     const assetUrl = new URL(url);
     assetUrl.pathname = pathname.slice("/static".length);
-    return env.ASSETS.fetch(new Request(assetUrl, request));
+    return serveAsset(env, new Request(assetUrl, request));
   }
 
-  return env.ASSETS.fetch(request);
+  return serveAsset(env, request);
 }
 
 export default {

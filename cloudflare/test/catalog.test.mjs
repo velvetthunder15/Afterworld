@@ -11,6 +11,22 @@ test("excludes structured decision models from chat while retaining normal Worke
   assert.deepEqual(parseWorkersAiModels(list).map((m) => m.id), ["workersai::@cf/meta/llama-3.1-8b-instruct"]);
 });
 
+test("filters paid-only Workers AI models on free plan and preserves vision/reasoning/LoRA-base properties", () => {
+  const list = [
+    { name: "@cf/deepseek-ai/deepseek-v4-pro-0813", task: { name: "Text Generation" }, properties: [{ property_id: "require_workers_paid", value: "true" }] },
+    { name: "@cf/google/gemma-2b-it-lora", task: { name: "Text Generation" }, properties: [{ property_id: "lora", value: "true" }] },
+    { name: "@cf/google/gemma-4-26b-a4b-it", task: { name: "Text Generation" }, properties: [{ property_id: "vision", value: "true" }, { property_id: "reasoning", value: "true" }, { property_id: "context_window", value: "256000" }] },
+    { name: "@cf/qwen/qwq-32b", task: { name: "Text Generation" }, properties: [{ property_id: "lora", value: "true" }, { property_id: "reasoning", value: "true" }] },
+  ];
+  const freeModels = parseWorkersAiModels(list);
+  assert.deepEqual(freeModels.map((m) => m.id), ["workersai::@cf/google/gemma-4-26b-a4b-it", "workersai::@cf/qwen/qwq-32b"]);
+  assert.equal(freeModels[0].vision, true);
+  assert.equal(freeModels[0].reasoning, true);
+  assert.equal(freeModels[1].name, "QwQ 32B");
+  const paidModels = parseWorkersAiModels(list, "2026-11-11", { paidPlan: true });
+  assert.equal(paidModels.length, 3);
+});
+
 test("excludes music generation models even when catalog metadata says text", () => {
   const model = { id: "google/lyria-3-pro-preview", architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["max_tokens"] };
   assert.equal(isChatModel(model), false);
@@ -56,6 +72,13 @@ const CASES = {
       [
         124.0,
         5.5
+      ]
+    ],
+    [
+      "We introduce DeepSeek-V4.1-Flash, a multimodal model with 552B backbone parameters.",
+      [
+        552.0,
+        null
       ]
     ],
     [
